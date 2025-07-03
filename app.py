@@ -13,8 +13,7 @@ st.set_page_config(
 )
 
 # --- LOGO EN LA BARRA LATERAL ---
-# Puedes cambiar la URL por la de tu propio logo
-LOGO_URL = "https://placehold.co/300x100/FFFFFF/000000/png?text=CAPRICORNIO&font=raleway"
+LOGO_URL = "https://raw.githubusercontent.com/OscarIvaVP/inventario-ventas/main/assets/logo.jpeg"
 st.sidebar.image(LOGO_URL, use_column_width=True)
 st.sidebar.title("Menú de Navegación")
 
@@ -182,33 +181,57 @@ elif opcion == "💰 Registrar Venta":
         
         if st.session_state.venta_actual:
             st.markdown("---")
-            st.subheader(f"Paso 3: Finalizar Venta para {cliente_final}")
+            st.subheader("Venta Actual")
             df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
             st.dataframe(df_venta_actual, use_container_width=True)
-            total_venta_actual = df_venta_actual["Total Venta"].sum()
-            st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
 
-            with st.form("finalizar_venta_form"):
-                estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
-                if st.form_submit_button("✅ Registrar Venta Completa"):
-                    if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
-                        sheets["clientes"].append_row([cliente_nuevo])
-                        st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
-                        st.cache_data.clear()
-                    
-                    with st.spinner("Registrando venta..."):
-                        id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
-                        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        filas_para_añadir = []
-                        for item in st.session_state.venta_actual:
-                            fila = [id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago]
-                            filas_para_añadir.append(fila)
-                        sheets["ventas"].append_rows(filas_para_añadir)
-                        st.success(f"¡Venta {id_venta} registrada!")
-                        st.balloons()
-                        st.session_state.venta_actual = []
-                        actualizar_inventario()
-                        st.rerun()
+            # --- NUEVA SECCIÓN PARA ELIMINAR ITEMS ---
+            with st.form("eliminar_item_venta_form"):
+                st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
+                indices_a_eliminar = st.multiselect(
+                    "Selecciona productos para eliminar",
+                    options=range(len(st.session_state.venta_actual)),
+                    format_func=lambda i: f"{st.session_state.venta_actual[i]['Producto']} (Talla: {st.session_state.venta_actual[i]['Talla']}, Cant: {st.session_state.venta_actual[i]['Cantidad']})"
+                )
+                if st.form_submit_button("🗑️ Eliminar Seleccionados"):
+                    if indices_a_eliminar:
+                        # Reconstruir la lista excluyendo los índices seleccionados
+                        st.session_state.venta_actual = [
+                            item for i, item in enumerate(st.session_state.venta_actual)
+                            if i not in indices_a_eliminar
+                        ]
+                        st.rerun() # Recargar la página para ver el cambio
+                    else:
+                        st.warning("No has seleccionado ningún producto para eliminar.")
+            # --- FIN DE LA SECCIÓN PARA ELIMINAR ---
+            
+            if st.session_state.venta_actual: # Volver a chequear por si se eliminaron todos
+                st.markdown("---")
+                st.subheader(f"Paso 3: Finalizar Venta para {cliente_final}")
+                total_venta_actual = pd.DataFrame(st.session_state.venta_actual)["Total Venta"].sum()
+                st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
+
+                with st.form("finalizar_venta_form"):
+                    estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
+                    if st.form_submit_button("✅ Registrar Venta Completa"):
+                        if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
+                            sheets["clientes"].append_row([cliente_nuevo])
+                            st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
+                            st.cache_data.clear()
+                        
+                        with st.spinner("Registrando venta..."):
+                            id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
+                            fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            filas_para_añadir = []
+                            for item in st.session_state.venta_actual:
+                                fila = [id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago]
+                                filas_para_añadir.append(fila)
+                            sheets["ventas"].append_rows(filas_para_añadir)
+                            st.success(f"¡Venta {id_venta} registrada!")
+                            st.balloons()
+                            st.session_state.venta_actual = []
+                            actualizar_inventario()
+                            st.rerun()
     else:
         st.warning("Por favor, selecciona o añade un cliente para continuar.")
 
@@ -246,30 +269,52 @@ elif opcion == "🛒 Registrar Compra":
 
         if st.session_state.compra_actual:
             st.markdown("---")
-            st.subheader(f"Paso 3: Finalizar Compra de {proveedor_final}")
+            st.subheader("Orden de Compra Actual")
             st.dataframe(pd.DataFrame(st.session_state.compra_actual), use_container_width=True)
 
-            with st.form("finalizar_compra_form"):
-                costo_envio = st.number_input("Costo Total del Envío ($)", min_value=0.0, format="%.2f")
-                if st.form_submit_button("✅ Registrar Compra Completa"):
-                    if proveedor_nuevo and proveedor_nuevo not in proveedores_df['NombreProveedor'].tolist():
-                        sheets["proveedores"].append_row([proveedor_nuevo])
-                        st.success(f"¡Nuevo proveedor '{proveedor_nuevo}' añadido a la base de datos!")
-                        st.cache_data.clear()
-                    
-                    with st.spinner("Registrando compra..."):
-                        id_compra = f"COMPRA-{uuid.uuid4().hex[:8].upper()}"
-                        fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        filas_para_añadir = []
-                        for item in st.session_state.compra_actual:
-                            fila = [id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor_final, item["Cantidad"], item["Costo Total"], costo_envio]
-                            filas_para_añadir.append(fila)
-                        sheets["compras"].append_rows(filas_para_añadir)
-                        st.success(f"¡Compra {id_compra} registrada!")
-                        st.balloons()
-                        st.session_state.compra_actual = []
-                        actualizar_inventario()
+            # --- NUEVA SECCIÓN PARA ELIMINAR ITEMS ---
+            with st.form("eliminar_item_compra_form"):
+                st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
+                indices_a_eliminar = st.multiselect(
+                    "Selecciona productos para eliminar",
+                    options=range(len(st.session_state.compra_actual)),
+                    format_func=lambda i: f"{st.session_state.compra_actual[i]['Producto']} (Talla: {st.session_state.compra_actual[i]['Talla']}, Cant: {st.session_state.compra_actual[i]['Cantidad']})"
+                )
+                if st.form_submit_button("🗑️ Eliminar Seleccionados"):
+                    if indices_a_eliminar:
+                        st.session_state.compra_actual = [
+                            item for i, item in enumerate(st.session_state.compra_actual)
+                            if i not in indices_a_eliminar
+                        ]
                         st.rerun()
+                    else:
+                        st.warning("No has seleccionado ningún producto para eliminar.")
+            # --- FIN DE LA SECCIÓN PARA ELIMINAR ---
+
+            if st.session_state.compra_actual:
+                st.markdown("---")
+                st.subheader(f"Paso 3: Finalizar Compra de {proveedor_final}")
+                with st.form("finalizar_compra_form"):
+                    costo_envio = st.number_input("Costo Total del Envío ($)", min_value=0.0, format="%.2f")
+                    if st.form_submit_button("✅ Registrar Compra Completa"):
+                        if proveedor_nuevo and proveedor_nuevo not in proveedores_df['NombreProveedor'].tolist():
+                            sheets["proveedores"].append_row([proveedor_nuevo])
+                            st.success(f"¡Nuevo proveedor '{proveedor_nuevo}' añadido a la base de datos!")
+                            st.cache_data.clear()
+                        
+                        with st.spinner("Registrando compra..."):
+                            id_compra = f"COMPRA-{uuid.uuid4().hex[:8].upper()}"
+                            fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            filas_para_añadir = []
+                            for item in st.session_state.compra_actual:
+                                fila = [id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor_final, item["Cantidad"], item["Costo Total"], costo_envio]
+                                filas_para_añadir.append(fila)
+                            sheets["compras"].append_rows(filas_para_añadir)
+                            st.success(f"¡Compra {id_compra} registrada!")
+                            st.balloons()
+                            st.session_state.compra_actual = []
+                            actualizar_inventario()
+                            st.rerun()
     else:
         st.warning("Por favor, selecciona o añade un proveedor para continuar.")
 
