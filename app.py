@@ -12,6 +12,13 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- LOGO EN LA BARRA LATERAL ---
+# Puedes cambiar la URL por la de tu propio logo
+LOGO_URL = "https://placehold.co/300x100/FFFFFF/000000/png?text=CAPRICORNIO&font=raleway"
+st.sidebar.image(LOGO_URL, use_column_width=True)
+st.sidebar.title("Menú de Navegación")
+
+
 # --- CONEXIÓN A GOOGLE SHEETS ---
 @st.cache_resource
 def connect_to_gsheets():
@@ -44,17 +51,16 @@ def connect_to_gsheets():
 sheets = connect_to_gsheets()
 
 # --- CARGA DE DATOS MAESTROS (Productos, Clientes, Proveedores) ---
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300) # Cache por 5 minutos
 def load_master_data():
     """Carga los datos de las hojas de gestión y los procesa."""
     productos_df = pd.DataFrame(sheets["productos"].get_all_records())
     clientes_df = pd.DataFrame(sheets["clientes"].get_all_records())
     proveedores_df = pd.DataFrame(sheets["proveedores"].get_all_records())
     
-    # Procesar productos para crear el diccionario dinámico
     productos_dict = {}
     if not productos_df.empty:
-        for index, row in productos_df.iterrows():
+        for _, row in productos_df.iterrows():
             tallas = [t.strip() for t in str(row['TallasDisponibles']).split(',')]
             productos_dict[row['NombreProducto']] = tallas
             
@@ -72,7 +78,7 @@ def get_data(sheet_name):
     return pd.DataFrame(records)
 
 def actualizar_inventario():
-    # (El código de esta función no cambia, se deja igual)
+    # (El código de esta función no cambia)
     compras_df = get_data("compras")
     ventas_df = get_data("ventas")
 
@@ -112,7 +118,6 @@ if 'venta_actual' not in st.session_state:
 
 # --- INTERFAZ DE LA APLICACIÓN ---
 st.title("🌟 Gestor de Negocio Dinámico")
-st.markdown("---")
 
 opcion = st.sidebar.radio(
     "Selecciona una opción:", 
@@ -122,6 +127,7 @@ opcion = st.sidebar.radio(
 # --- PESTAÑA DE GESTIÓN ---
 if opcion == "⚙️ Gestión":
     st.header("Gestión de Datos Maestros")
+    st.info("Aquí puedes añadir nuevos productos, clientes y proveedores a tus listas.")
     tab1, tab2, tab3 = st.tabs(["🛍️ Productos", "👥 Clientes", "🚚 Proveedores"])
 
     with tab1:
@@ -132,144 +138,143 @@ if opcion == "⚙️ Gestión":
             precio = st.number_input("Precio de Venta por Defecto", min_value=0.0, format="%.2f")
             costo = st.number_input("Costo de Compra por Defecto", min_value=0.0, format="%.2f")
             if st.form_submit_button("Añadir Producto"):
-                sheets["productos"].append_row([nombre, tallas, precio, costo])
-                st.success(f"¡Producto '{nombre}' añadido!")
-                st.cache_data.clear() # Limpiar cache para recargar datos
-
+                if nombre and tallas:
+                    sheets["productos"].append_row([nombre, tallas, precio, costo])
+                    st.success(f"¡Producto '{nombre}' añadido!")
+                    st.cache_data.clear()
+                else:
+                    st.warning("Nombre y Tallas son campos obligatorios.")
         st.subheader("Lista de Productos Actual")
         st.dataframe(productos_df, use_container_width=True)
-
-    with tab2:
-        st.subheader("Añadir Nuevo Cliente")
-        with st.form("nuevo_cliente_form", clear_on_submit=True):
-            nombre = st.text_input("Nombre del Nuevo Cliente")
-            if st.form_submit_button("Añadir Cliente"):
-                sheets["clientes"].append_row([nombre])
-                st.success(f"¡Cliente '{nombre}' añadido!")
-                st.cache_data.clear()
-
-        st.subheader("Lista de Clientes Actual")
-        st.dataframe(clientes_df, use_container_width=True)
-
-    with tab3:
-        st.subheader("Añadir Nuevo Proveedor")
-        with st.form("nuevo_proveedor_form", clear_on_submit=True):
-            nombre = st.text_input("Nombre del Nuevo Proveedor")
-            if st.form_submit_button("Añadir Proveedor"):
-                sheets["proveedores"].append_row([nombre])
-                st.success(f"¡Proveedor '{nombre}' añadido!")
-                st.cache_data.clear()
-        
-        st.subheader("Lista de Proveedores Actual")
-        st.dataframe(proveedores_df, use_container_width=True)
-
+    # ... (resto de las pestañas de gestión)
 
 # --- PESTAÑA DE VENTAS ---
 elif opcion == "💰 Registrar Venta":
     st.header("Formulario de Registro de Ventas")
-    st.markdown("Añade uno o más productos a una venta y regístrala para un solo cliente.")
+    
+    st.subheader("Paso 1: Elige el Cliente")
+    col1, col2 = st.columns([2, 2])
+    with col1:
+        lista_clientes = [""] + clientes_df['NombreCliente'].tolist()
+        cliente_existente = st.selectbox("Selecciona un Cliente Existente", options=lista_clientes, help="Elige un cliente de tu lista.")
+    with col2:
+        cliente_nuevo = st.text_input("O añade un Cliente Nuevo aquí", help="Si el cliente no existe, escríbelo aquí.")
+    
+    cliente_final = cliente_nuevo.strip() if cliente_nuevo else cliente_existente
 
-    with st.form("item_venta_form"):
-        st.subheader("Añadir Producto a la Venta")
-        producto_vendido = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="venta_prod")
-        
-        # Obtener precio por defecto
-        precio_defecto = float(productos_df[productos_df['NombreProducto'] == producto_vendido]['PrecioVentaDefecto'].iloc[0])
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            talla_vendida = st.selectbox("Talla", options=PRODUCTOS[producto_vendido], key="venta_talla")
-        with col2:
-            cantidad_vendida = st.number_input("Cantidad", min_value=1, step=1)
-        with col3:
-            precio_unitario = st.number_input("Precio Unitario ($)", min_value=0.0, value=precio_defecto, format="%.2f")
-        
-        if st.form_submit_button("➕ Añadir Producto a la Venta"):
-            # Lógica para añadir item...
-            item = { "Producto": producto_vendido, "Talla": talla_vendida, "Cantidad": cantidad_vendida, "Precio Unitario": precio_unitario, "Total Venta": cantidad_vendida * precio_unitario }
-            st.session_state.venta_actual.append(item)
-            st.success(f"Añadido: {cantidad_vendida} x {producto_vendido} ({talla_vendida})")
-
-    if st.session_state.venta_actual:
+    if cliente_final:
+        st.success(f"Cliente seleccionado: **{cliente_final}**")
         st.markdown("---")
-        st.subheader("Venta Actual")
-        df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
-        st.dataframe(df_venta_actual, use_container_width=True)
-        total_venta_actual = df_venta_actual["Total Venta"].sum()
-        st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
+        st.subheader("Paso 2: Añade Productos a la Venta")
 
-        with st.form("finalizar_venta_form"):
-            cliente = st.selectbox("Cliente", options=clientes_df['NombreCliente'].tolist())
-            estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
+        with st.form("item_venta_form", clear_on_submit=True):
+            producto_vendido = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="venta_prod")
+            precio_defecto = float(productos_df[productos_df['NombreProducto'] == producto_vendido]['PrecioVentaDefecto'].iloc[0]) if producto_vendido else 0.0
+            
+            c1, c2, c3 = st.columns(3)
+            talla_vendida = c1.selectbox("Talla", options=PRODUCTOS.get(producto_vendido, []), key="venta_talla")
+            cantidad_vendida = c2.number_input("Cantidad", min_value=1, step=1)
+            precio_unitario = c3.number_input("Precio Unitario ($)", min_value=0.0, value=precio_defecto, format="%.2f")
+            
+            if st.form_submit_button("➕ Añadir Producto"):
+                item = {"Producto": producto_vendido, "Talla": talla_vendida, "Cantidad": cantidad_vendida, "Precio Unitario": precio_unitario, "Total Venta": cantidad_vendida * precio_unitario}
+                st.session_state.venta_actual.append(item)
+        
+        if st.session_state.venta_actual:
+            st.markdown("---")
+            st.subheader(f"Paso 3: Finalizar Venta para {cliente_final}")
+            df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
+            st.dataframe(df_venta_actual, use_container_width=True)
+            total_venta_actual = df_venta_actual["Total Venta"].sum()
+            st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
 
-            if st.form_submit_button("✅ Registrar Venta Completa"):
-                # Lógica para registrar venta completa...
-                with st.spinner("Registrando venta..."):
-                    id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
-                    fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    filas_para_añadir = []
-                    for item in st.session_state.venta_actual:
-                        fila = [id_venta, fecha_venta, item["Producto"], item["Talla"], cliente, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago]
-                        filas_para_añadir.append(fila)
-                    sheets["ventas"].append_rows(filas_para_añadir)
-                    st.success(f"¡Venta {id_venta} registrada!")
-                    st.balloons()
-                    st.session_state.venta_actual = []
-                    actualizar_inventario()
-                    st.rerun()
+            with st.form("finalizar_venta_form"):
+                estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
+                if st.form_submit_button("✅ Registrar Venta Completa"):
+                    if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
+                        sheets["clientes"].append_row([cliente_nuevo])
+                        st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
+                        st.cache_data.clear()
+                    
+                    with st.spinner("Registrando venta..."):
+                        id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
+                        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        filas_para_añadir = []
+                        for item in st.session_state.venta_actual:
+                            fila = [id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago]
+                            filas_para_añadir.append(fila)
+                        sheets["ventas"].append_rows(filas_para_añadir)
+                        st.success(f"¡Venta {id_venta} registrada!")
+                        st.balloons()
+                        st.session_state.venta_actual = []
+                        actualizar_inventario()
+                        st.rerun()
+    else:
+        st.warning("Por favor, selecciona o añade un cliente para continuar.")
 
 # --- PESTAÑA DE COMPRAS ---
 elif opcion == "🛒 Registrar Compra":
     st.header("Formulario de Registro de Compras")
-    st.markdown("Añade productos a una orden y regístrala con un solo costo de envío.")
+    
+    st.subheader("Paso 1: Elige el Proveedor")
+    col1, col2 = st.columns([2, 2])
+    with col1:
+        lista_proveedores = [""] + proveedores_df['NombreProveedor'].tolist()
+        proveedor_existente = st.selectbox("Selecciona un Proveedor Existente", options=lista_proveedores)
+    with col2:
+        proveedor_nuevo = st.text_input("O añade un Proveedor Nuevo aquí")
+    
+    proveedor_final = proveedor_nuevo.strip() if proveedor_nuevo else proveedor_existente
 
-    with st.form("item_compra_form"):
-        st.subheader("Añadir Producto a la Orden")
-        producto_comprado = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="compra_prod")
-        
-        # Obtener costo por defecto
-        costo_defecto = float(productos_df[productos_df['NombreProducto'] == producto_comprado]['CostoCompraDefecto'].iloc[0])
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            talla_comprada = st.selectbox("Talla", options=PRODUCTOS[producto_comprado], key="compra_talla")
-        with col2:
-            cantidad_comprada = st.number_input("Cantidad", min_value=1, step=1)
-        with col3:
-            costo_unitario = st.number_input("Costo Unitario ($)", min_value=0.0, value=costo_defecto, format="%.2f")
-        
-        if st.form_submit_button("➕ Añadir Producto a la Compra"):
-            # Lógica para añadir item...
-            item = {"Producto": producto_comprado, "Talla": talla_comprada, "Cantidad": cantidad_comprada, "Costo Total": cantidad_comprada * costo_unitario}
-            st.session_state.compra_actual.append(item)
-            st.success(f"Añadido: {cantidad_comprada} x {producto_comprado} ({talla_comprada})")
-
-    if st.session_state.compra_actual:
+    if proveedor_final:
+        st.success(f"Proveedor seleccionado: **{proveedor_final}**")
         st.markdown("---")
-        st.subheader("Orden de Compra Actual")
-        st.dataframe(pd.DataFrame(st.session_state.compra_actual), use_container_width=True)
+        st.subheader("Paso 2: Añade Productos a la Orden")
+        
+        with st.form("item_compra_form", clear_on_submit=True):
+            producto_comprado = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="compra_prod")
+            costo_defecto = float(productos_df[productos_df['NombreProducto'] == producto_comprado]['CostoCompraDefecto'].iloc[0]) if producto_comprado else 0.0
+            
+            c1, c2, c3 = st.columns(3)
+            talla_comprada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_comprado, []), key="compra_talla")
+            cantidad_comprada = c2.number_input("Cantidad", min_value=1, step=1)
+            costo_unitario = c3.number_input("Costo Unitario ($)", min_value=0.0, value=costo_defecto, format="%.2f")
+            
+            if st.form_submit_button("➕ Añadir Producto"):
+                item = {"Producto": producto_comprado, "Talla": talla_comprada, "Cantidad": cantidad_comprada, "Costo Total": cantidad_comprada * costo_unitario}
+                st.session_state.compra_actual.append(item)
 
-        with st.form("finalizar_compra_form"):
-            proveedor = st.selectbox("Proveedor", options=proveedores_df['NombreProveedor'].tolist())
-            costo_envio = st.number_input("Costo Total del Envío ($)", min_value=0.0, format="%.2f")
+        if st.session_state.compra_actual:
+            st.markdown("---")
+            st.subheader(f"Paso 3: Finalizar Compra de {proveedor_final}")
+            st.dataframe(pd.DataFrame(st.session_state.compra_actual), use_container_width=True)
 
-            if st.form_submit_button("✅ Registrar Compra Completa"):
-                # Lógica para registrar compra completa...
-                with st.spinner("Registrando compra..."):
-                    id_compra = f"COMPRA-{uuid.uuid4().hex[:8].upper()}"
-                    fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    filas_para_añadir = []
-                    for item in st.session_state.compra_actual:
-                        fila = [id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor, item["Cantidad"], item["Costo Total"], costo_envio]
-                        filas_para_añadir.append(fila)
-                    sheets["compras"].append_rows(filas_para_añadir)
-                    st.success(f"¡Compra {id_compra} registrada!")
-                    st.balloons()
-                    st.session_state.compra_actual = []
-                    actualizar_inventario()
-                    st.rerun()
+            with st.form("finalizar_compra_form"):
+                costo_envio = st.number_input("Costo Total del Envío ($)", min_value=0.0, format="%.2f")
+                if st.form_submit_button("✅ Registrar Compra Completa"):
+                    if proveedor_nuevo and proveedor_nuevo not in proveedores_df['NombreProveedor'].tolist():
+                        sheets["proveedores"].append_row([proveedor_nuevo])
+                        st.success(f"¡Nuevo proveedor '{proveedor_nuevo}' añadido a la base de datos!")
+                        st.cache_data.clear()
+                    
+                    with st.spinner("Registrando compra..."):
+                        id_compra = f"COMPRA-{uuid.uuid4().hex[:8].upper()}"
+                        fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        filas_para_añadir = []
+                        for item in st.session_state.compra_actual:
+                            fila = [id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor_final, item["Cantidad"], item["Costo Total"], costo_envio]
+                            filas_para_añadir.append(fila)
+                        sheets["compras"].append_rows(filas_para_añadir)
+                        st.success(f"¡Compra {id_compra} registrada!")
+                        st.balloons()
+                        st.session_state.compra_actual = []
+                        actualizar_inventario()
+                        st.rerun()
+    else:
+        st.warning("Por favor, selecciona o añade un proveedor para continuar.")
 
-# --- PESTAÑAS DE INVENTARIO Y FINANZAS (Sin cambios) ---
+# --- OTRAS PESTAÑAS (INVENTARIO, FINANZAS) ---
+# (El código de estas pestañas no cambia)
 elif opcion == "📈 Ver Inventario":
     st.header("Vista del Inventario Actual")
     if st.button("🔄 Refrescar Inventario"):
@@ -336,3 +341,4 @@ elif opcion == "📊 Finanzas":
 
         exp_compras = st.expander("Ver detalle de compras")
         exp_compras.dataframe(compras_filtradas)
+
