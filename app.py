@@ -203,7 +203,7 @@ elif opcion == "🛒 Registrar Compra":
                         st.balloons()
                         st.session_state.compra_actual = [] # Limpiar el carrito
                         actualizar_inventario()
-                        st.experimental_rerun()
+                        st.rerun()
 
 # --- PESTAÑA DE INVENTARIO ---
 elif opcion == "📈 Ver Inventario":
