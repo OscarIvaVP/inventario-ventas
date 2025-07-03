@@ -12,9 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- LOGO EN LA BARRA LATERAL (CORREGIDO) ---
+# --- LOGO EN LA BARRA LATERAL ---
 LOGO_URL = "https://raw.githubusercontent.com/OscarIvaVP/inventario-ventas/main/assets/logo.jpeg"
-st.sidebar.image(LOGO_URL, use_container_width=True) # <--- CORRECCIÓN AQUÍ
+st.sidebar.image(LOGO_URL, use_container_width=True)
 st.sidebar.title("Menú de Navegación")
 
 
@@ -123,7 +123,7 @@ opcion = st.sidebar.radio(
     ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas", "⚙️ Gestión"]
 )
 
-# --- PESTAÑA DE GESTIÓN (CORREGIDO) ---
+# --- PESTAÑA DE GESTIÓN ---
 if opcion == "⚙️ Gestión":
     st.header("Gestión de Datos Maestros")
     st.info("Aquí puedes añadir nuevos productos, clientes y proveedores a tus listas.")
@@ -197,18 +197,34 @@ elif opcion == "💰 Registrar Venta":
         st.markdown("---")
         st.subheader("Paso 2: Añade Productos a la Venta")
 
-        with st.form("item_venta_form", clear_on_submit=True):
-            producto_vendido = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="venta_prod")
-            precio_defecto = float(productos_df[productos_df['NombreProducto'] == producto_vendido]['PrecioVentaDefecto'].iloc[0]) if producto_vendido else 0.0
-            
-            c1, c2, c3 = st.columns(3)
-            talla_vendida = c1.selectbox("Talla", options=PRODUCTOS.get(producto_vendido, []), key="venta_talla")
-            cantidad_vendida = c2.number_input("Cantidad", min_value=1, step=1)
-            precio_unitario = c3.number_input("Precio Unitario ($)", min_value=0.0, value=precio_defecto, format="%.2f")
-            
-            if st.form_submit_button("➕ Añadir Producto"):
-                item = {"Producto": producto_vendido, "Talla": talla_vendida, "Cantidad": cantidad_vendida, "Precio Unitario": precio_unitario, "Total Venta": cantidad_vendida * precio_unitario}
-                st.session_state.venta_actual.append(item)
+        producto_vendido = st.selectbox(
+            "Selecciona un producto", 
+            options=[""] + list(PRODUCTOS.keys()), 
+            key="venta_prod_selector",
+            label_visibility="collapsed"
+        )
+
+        if producto_vendido:
+            with st.form("item_venta_form", clear_on_submit=True):
+                st.write(f"**Añadiendo:** {producto_vendido}")
+                precio_defecto = float(productos_df[productos_df['NombreProducto'] == producto_vendido]['PrecioVentaDefecto'].iloc[0])
+                
+                c1, c2, c3 = st.columns(3)
+                talla_vendida = c1.selectbox("Talla", options=PRODUCTOS.get(producto_vendido, []))
+                cantidad_vendida = c2.number_input("Cantidad", min_value=1, step=1)
+                # --- CORRECCIÓN AQUÍ: AÑADIR LLAVE ÚNICA ---
+                precio_unitario = c3.number_input(
+                    "Precio Unitario ($)", 
+                    min_value=0.0, 
+                    value=precio_defecto, 
+                    format="%.2f",
+                    key=f"precio_venta_{producto_vendido}"
+                )
+                
+                if st.form_submit_button("➕ Añadir Producto"):
+                    item = {"Producto": producto_vendido, "Talla": talla_vendida, "Cantidad": cantidad_vendida, "Precio Unitario": precio_unitario, "Total Venta": cantidad_vendida * precio_unitario}
+                    st.session_state.venta_actual.append(item)
+                    st.rerun()
         
         if st.session_state.venta_actual:
             st.markdown("---")
@@ -216,7 +232,6 @@ elif opcion == "💰 Registrar Venta":
             df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
             st.dataframe(df_venta_actual, use_container_width=True)
 
-            # --- NUEVA SECCIÓN PARA ELIMINAR ITEMS ---
             with st.form("eliminar_item_venta_form"):
                 st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
                 indices_a_eliminar = st.multiselect(
@@ -226,17 +241,12 @@ elif opcion == "💰 Registrar Venta":
                 )
                 if st.form_submit_button("🗑️ Eliminar Seleccionados"):
                     if indices_a_eliminar:
-                        # Reconstruir la lista excluyendo los índices seleccionados
-                        st.session_state.venta_actual = [
-                            item for i, item in enumerate(st.session_state.venta_actual)
-                            if i not in indices_a_eliminar
-                        ]
-                        st.rerun() # Recargar la página para ver el cambio
+                        st.session_state.venta_actual = [item for i, item in enumerate(st.session_state.venta_actual) if i not in indices_a_eliminar]
+                        st.rerun()
                     else:
                         st.warning("No has seleccionado ningún producto para eliminar.")
-            # --- FIN DE LA SECCIÓN PARA ELIMINAR ---
             
-            if st.session_state.venta_actual: # Volver a chequear por si se eliminaron todos
+            if st.session_state.venta_actual:
                 st.markdown("---")
                 st.subheader(f"Paso 3: Finalizar Venta para {cliente_final}")
                 total_venta_actual = pd.DataFrame(st.session_state.venta_actual)["Total Venta"].sum()
@@ -285,25 +295,40 @@ elif opcion == "🛒 Registrar Compra":
         st.markdown("---")
         st.subheader("Paso 2: Añade Productos a la Orden")
         
-        with st.form("item_compra_form", clear_on_submit=True):
-            producto_comprado = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="compra_prod")
-            costo_defecto = float(productos_df[productos_df['NombreProducto'] == producto_comprado]['CostoCompraDefecto'].iloc[0]) if producto_comprado else 0.0
-            
-            c1, c2, c3 = st.columns(3)
-            talla_comprada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_comprado, []), key="compra_talla")
-            cantidad_comprada = c2.number_input("Cantidad", min_value=1, step=1)
-            costo_unitario = c3.number_input("Costo Unitario ($)", min_value=0.0, value=costo_defecto, format="%.2f")
-            
-            if st.form_submit_button("➕ Añadir Producto"):
-                item = {"Producto": producto_comprado, "Talla": talla_comprada, "Cantidad": cantidad_comprada, "Costo Total": cantidad_comprada * costo_unitario}
-                st.session_state.compra_actual.append(item)
+        producto_comprado = st.selectbox(
+            "Selecciona un producto", 
+            options=[""] + list(PRODUCTOS.keys()), 
+            key="compra_prod_selector",
+            label_visibility="collapsed"
+        )
+
+        if producto_comprado:
+            with st.form("item_compra_form", clear_on_submit=True):
+                st.write(f"**Añadiendo:** {producto_comprado}")
+                costo_defecto = float(productos_df[productos_df['NombreProducto'] == producto_comprado]['CostoCompraDefecto'].iloc[0])
+                
+                c1, c2, c3 = st.columns(3)
+                talla_comprada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_comprado, []))
+                cantidad_comprada = c2.number_input("Cantidad", min_value=1, step=1)
+                # --- CORRECCIÓN AQUÍ: AÑADIR LLAVE ÚNICA ---
+                costo_unitario = c3.number_input(
+                    "Costo Unitario ($)", 
+                    min_value=0.0, 
+                    value=costo_defecto, 
+                    format="%.2f",
+                    key=f"costo_compra_{producto_comprado}"
+                )
+                
+                if st.form_submit_button("➕ Añadir Producto"):
+                    item = {"Producto": producto_comprado, "Talla": talla_comprada, "Cantidad": cantidad_comprada, "Costo Total": cantidad_comprada * costo_unitario}
+                    st.session_state.compra_actual.append(item)
+                    st.rerun()
 
         if st.session_state.compra_actual:
             st.markdown("---")
             st.subheader("Orden de Compra Actual")
             st.dataframe(pd.DataFrame(st.session_state.compra_actual), use_container_width=True)
 
-            # --- NUEVA SECCIÓN PARA ELIMINAR ITEMS ---
             with st.form("eliminar_item_compra_form"):
                 st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
                 indices_a_eliminar = st.multiselect(
@@ -313,14 +338,10 @@ elif opcion == "🛒 Registrar Compra":
                 )
                 if st.form_submit_button("🗑️ Eliminar Seleccionados"):
                     if indices_a_eliminar:
-                        st.session_state.compra_actual = [
-                            item for i, item in enumerate(st.session_state.compra_actual)
-                            if i not in indices_a_eliminar
-                        ]
+                        st.session_state.compra_actual = [item for i, item in enumerate(st.session_state.compra_actual) if i not in indices_a_eliminar]
                         st.rerun()
                     else:
                         st.warning("No has seleccionado ningún producto para eliminar.")
-            # --- FIN DE LA SECCIÓN PARA ELIMINAR ---
 
             if st.session_state.compra_actual:
                 st.markdown("---")
@@ -350,7 +371,6 @@ elif opcion == "🛒 Registrar Compra":
         st.warning("Por favor, selecciona o añade un proveedor para continuar.")
 
 # --- OTRAS PESTAÑAS (INVENTARIO, FINANZAS) ---
-# (El código de estas pestañas no cambia)
 elif opcion == "📈 Ver Inventario":
     st.header("Vista del Inventario Actual")
     if st.button("🔄 Refrescar Inventario"):
@@ -413,8 +433,7 @@ elif opcion == "📊 Finanzas":
         st.subheader(f"Detalle para: {mes_seleccionado}")
         
         exp_ventas = st.expander("Ver detalle de ventas")
-        exp_ventas.dataframe(ventas_filtradas)
+        exp_ventas.dataframe(ventas_filtradas, use_container_width=True)
 
         exp_compras = st.expander("Ver detalle de compras")
-        exp_compras.dataframe(compras_filtradas)
-
+        exp_compras.dataframe(compras_filtradas, use_container_width=True)
