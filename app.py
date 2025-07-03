@@ -12,9 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- LOGO EN LA BARRA LATERAL ---
+# --- LOGO EN LA BARRA LATERAL (CORREGIDO) ---
 LOGO_URL = "https://raw.githubusercontent.com/OscarIvaVP/inventario-ventas/main/assets/logo.jpeg"
-st.sidebar.image(LOGO_URL, use_column_width=True)
+st.sidebar.image(LOGO_URL, use_container_width=True) # <--- CORRECCIÓN AQUÍ
 st.sidebar.title("Menú de Navegación")
 
 
@@ -123,7 +123,7 @@ opcion = st.sidebar.radio(
     ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas", "⚙️ Gestión"]
 )
 
-# --- PESTAÑA DE GESTIÓN ---
+# --- PESTAÑA DE GESTIÓN (CORREGIDO) ---
 if opcion == "⚙️ Gestión":
     st.header("Gestión de Datos Maestros")
     st.info("Aquí puedes añadir nuevos productos, clientes y proveedores a tus listas.")
@@ -141,11 +141,42 @@ if opcion == "⚙️ Gestión":
                     sheets["productos"].append_row([nombre, tallas, precio, costo])
                     st.success(f"¡Producto '{nombre}' añadido!")
                     st.cache_data.clear()
+                    st.rerun()
                 else:
                     st.warning("Nombre y Tallas son campos obligatorios.")
         st.subheader("Lista de Productos Actual")
         st.dataframe(productos_df, use_container_width=True)
-    # ... (resto de las pestañas de gestión)
+    
+    with tab2:
+        st.subheader("Añadir Nuevo Cliente")
+        with st.form("nuevo_cliente_form", clear_on_submit=True):
+            nombre = st.text_input("Nombre del Nuevo Cliente")
+            if st.form_submit_button("Añadir Cliente"):
+                if nombre:
+                    sheets["clientes"].append_row([nombre])
+                    st.success(f"¡Cliente '{nombre}' añadido!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning("El nombre del cliente no puede estar vacío.")
+        st.subheader("Lista de Clientes Actual")
+        st.dataframe(clientes_df, use_container_width=True)
+
+    with tab3:
+        st.subheader("Añadir Nuevo Proveedor")
+        with st.form("nuevo_proveedor_form", clear_on_submit=True):
+            nombre = st.text_input("Nombre del Nuevo Proveedor")
+            if st.form_submit_button("Añadir Proveedor"):
+                if nombre:
+                    sheets["proveedores"].append_row([nombre])
+                    st.success(f"¡Proveedor '{nombre}' añadido!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning("El nombre del proveedor no puede estar vacío.")
+        st.subheader("Lista de Proveedores Actual")
+        st.dataframe(proveedores_df, use_container_width=True)
+
 
 # --- PESTAÑA DE VENTAS ---
 elif opcion == "💰 Registrar Venta":
