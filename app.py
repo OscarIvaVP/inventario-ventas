@@ -97,6 +97,8 @@ def actualizar_inventario():
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
 if 'compra_actual' not in st.session_state:
     st.session_state.compra_actual = []
+if 'venta_actual' not in st.session_state:
+    st.session_state.venta_actual = []
 
 # --- INTERFAZ DE LA APLICACIÓN ---
 
@@ -108,33 +110,80 @@ opcion = st.sidebar.radio(
     ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas"]
 )
 
-# --- PESTAÑA DE VENTAS ---
+# --- PESTAÑA DE VENTAS (LÓGICA MEJORADA) ---
 if opcion == "💰 Registrar Venta":
     st.header("Formulario de Registro de Ventas")
-    with st.form("venta_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            cliente = st.text_input("Nombre del Cliente")
-            producto_vendido = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="venta_prod")
-            talla_vendida = st.selectbox("Talla", options=PRODUCTOS[producto_vendido], key="venta_talla")
-        with col2:
-            cantidad_vendida = st.number_input("Cantidad Vendida", min_value=1, step=1)
-            precio_unitario = st.number_input("Precio Unitario ($)", min_value=0.0, format="%.2f")
-            estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
-        
-        total_venta = cantidad_vendida * precio_unitario
-        st.info(f"**Total de la Venta: ${total_venta:,.2f}**")
+    st.markdown("Añade uno o más productos a una venta y regístrala para un solo cliente.")
 
-        if st.form_submit_button("Registrar Venta"):
-            if not cliente or not producto_vendido:
-                st.warning("Por favor, completa todos los campos.")
-            else:
-                fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                nueva_venta = [fecha_venta, producto_vendido, talla_vendida, cliente, cantidad_vendida, precio_unitario, total_venta, estado_pago]
-                sheets["ventas"].append_row(nueva_venta)
-                st.success("✅ ¡Venta registrada exitosamente!")
-                st.balloons()
-                actualizar_inventario()
+    # Formulario para añadir un item a la venta
+    with st.form("item_venta_form"):
+        st.subheader("Añadir Producto a la Venta")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            producto_vendido = st.selectbox("Producto", options=list(PRODUCTOS.keys()), key="venta_prod")
+        with col2:
+            talla_vendida = st.selectbox("Talla", options=PRODUCTOS[producto_vendido], key="venta_talla")
+        with col3:
+            cantidad_vendida = st.number_input("Cantidad", min_value=1, step=1)
+        with col4:
+            precio_unitario = st.number_input("Precio Unitario ($)", min_value=0.0, format="%.2f")
+        
+        if st.form_submit_button("➕ Añadir Producto a la Venta"):
+            item = {
+                "Producto": producto_vendido,
+                "Talla": talla_vendida,
+                "Cantidad": cantidad_vendida,
+                "Precio Unitario": precio_unitario,
+                "Total Venta": cantidad_vendida * precio_unitario
+            }
+            st.session_state.venta_actual.append(item)
+            st.success(f"Añadido: {cantidad_vendida} x {producto_vendido} ({talla_vendida})")
+
+    # Mostrar la venta actual
+    if st.session_state.venta_actual:
+        st.markdown("---")
+        st.subheader("Venta Actual")
+        df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
+        st.dataframe(df_venta_actual, use_container_width=True)
+        
+        total_venta_actual = df_venta_actual["Total Venta"].sum()
+        st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
+
+        with st.form("finalizar_venta_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                cliente = st.text_input("Nombre del Cliente")
+            with col2:
+                estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
+
+            if st.form_submit_button("✅ Registrar Venta Completa en Google Sheets"):
+                if not cliente:
+                    st.warning("Por favor, ingresa el nombre del cliente.")
+                else:
+                    with st.spinner("Registrando venta..."):
+                        id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
+                        fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        filas_para_añadir = []
+                        for item in st.session_state.venta_actual:
+                            fila = [
+                                id_venta,
+                                fecha_venta,
+                                item["Producto"],
+                                item["Talla"],
+                                cliente,
+                                item["Cantidad"],
+                                item["Precio Unitario"],
+                                item["Total Venta"],
+                                estado_pago
+                            ]
+                            filas_para_añadir.append(fila)
+                        
+                        sheets["ventas"].append_rows(filas_para_añadir)
+                        st.success(f"¡Venta {id_venta} registrada exitosamente con {len(filas_para_añadir)} productos!")
+                        st.balloons()
+                        st.session_state.venta_actual = [] # Limpiar el carrito
+                        actualizar_inventario()
+                        st.rerun()
 
 # --- PESTAÑA DE COMPRAS (LÓGICA MEJORADA) ---
 elif opcion == "🛒 Registrar Compra":
