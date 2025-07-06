@@ -77,7 +77,7 @@ def get_data(sheet_name):
     return pd.DataFrame(records)
 
 def actualizar_inventario():
-    # (El código de esta función no cambia)
+    """Recalcula y actualiza el inventario basándose en un SKU (Producto + Talla)."""
     compras_df = get_data("compras")
     ventas_df = get_data("ventas")
 
@@ -87,21 +87,31 @@ def actualizar_inventario():
         return pd.DataFrame()
 
     if not compras_df.empty:
+        # --- CORRECCIÓN AQUÍ: Asegurar que la cantidad sea numérica ---
+        compras_df['Cantidad'] = pd.to_numeric(compras_df['Cantidad'], errors='coerce').fillna(0)
         compras_df['SKU'] = compras_df['Producto'].astype(str) + " - " + compras_df['Talla'].astype(str)
         stock_comprado = compras_df.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Compradas'})
     else:
         stock_comprado = pd.DataFrame(columns=['SKU', 'Unidades Compradas'])
 
     if not ventas_df.empty:
+        # --- CORRECCIÓN AQUÍ: Asegurar que la cantidad sea numérica ---
+        ventas_df['Cantidad'] = pd.to_numeric(ventas_df['Cantidad'], errors='coerce').fillna(0)
         ventas_df['SKU'] = ventas_df['Producto'].astype(str) + " - " + ventas_df['Talla'].astype(str)
         stock_vendido = ventas_df.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Vendidas'})
     else:
         stock_vendido = pd.DataFrame(columns=['SKU', 'Unidades Vendidas'])
 
     inventario_df = pd.merge(stock_comprado, stock_vendido, on='SKU', how='outer').fillna(0)
+    
+    # --- CORRECCIÓN AQUÍ: Asegurar que las columnas para restar sean numéricas ---
+    inventario_df['Unidades Compradas'] = pd.to_numeric(inventario_df['Unidades Compradas'], errors='coerce').fillna(0)
+    inventario_df['Unidades Vendidas'] = pd.to_numeric(inventario_df['Unidades Vendidas'], errors='coerce').fillna(0)
+
     inventario_df[['Producto', 'Talla']] = inventario_df['SKU'].str.split(' - ', expand=True)
     inventario_df['Stock Actual'] = inventario_df['Unidades Compradas'] - inventario_df['Unidades Vendidas']
     inventario_df['Fecha Actualizacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     column_order = ["SKU", "Producto", "Talla", "Unidades Compradas", "Unidades Vendidas", "Stock Actual", "Fecha Actualizacion"]
     inventario_df = inventario_df[column_order]
 
@@ -212,7 +222,6 @@ elif opcion == "💰 Registrar Venta":
                 c1, c2, c3 = st.columns(3)
                 talla_vendida = c1.selectbox("Talla", options=PRODUCTOS.get(producto_vendido, []))
                 cantidad_vendida = c2.number_input("Cantidad", min_value=1, step=1)
-                # --- CORRECCIÓN AQUÍ: AÑADIR LLAVE ÚNICA ---
                 precio_unitario = c3.number_input(
                     "Precio Unitario ($)", 
                     min_value=0.0, 
@@ -310,7 +319,6 @@ elif opcion == "🛒 Registrar Compra":
                 c1, c2, c3 = st.columns(3)
                 talla_comprada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_comprado, []))
                 cantidad_comprada = c2.number_input("Cantidad", min_value=1, step=1)
-                # --- CORRECCIÓN AQUÍ: AÑADIR LLAVE ÚNICA ---
                 costo_unitario = c3.number_input(
                     "Costo Unitario ($)", 
                     min_value=0.0, 
