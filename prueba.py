@@ -41,16 +41,20 @@ def connect_to_gsheets():
             "inventario": spreadsheet.worksheet("Inventario"),
             "productos": spreadsheet.worksheet("Productos"),
             "clientes": spreadsheet.worksheet("Clientes"),
-            "proveedores": spreadsheet.worksheet("Proveedores")
+            "proveedores": spreadsheet.worksheet("Proveedores"),
+            "pagos": spreadsheet.worksheet("Pagos")
         }
     except gspread.exceptions.SpreadsheetNotFound:
         st.error("🚨 No se encontró la hoja de cálculo 'BaseDeDatos_Negocio'. Asegúrate de que exista y esté compartida.")
         st.stop()
+    except gspread.exceptions.WorksheetNotFound:
+        st.error("🚨 Falta una o más hojas requeridas (Ventas, Compras, Inventario, Productos, Clientes, Proveedores, Pagos). Por favor, créalas.")
+        st.stop()
 
 sheets = connect_to_gsheets()
 
-# --- CARGA DE DATOS MAESTROS (Productos, Clientes, Proveedores) ---
-@st.cache_data(ttl=300) # Cache por 5 minutos
+# --- CARGA DE DATOS MAESTROS ---
+@st.cache_data(ttl=300)
 def load_master_data():
     """Carga los datos de las hojas de gestión y los procesa."""
     productos_df = pd.DataFrame(sheets["productos"].get_all_records())
@@ -72,12 +76,15 @@ def get_data(sheet_name):
     """Obtiene datos de una hoja y los devuelve como DataFrame."""
     records = sheets[sheet_name].get_all_records()
     if not records:
-        headers = sheets[sheet_name].row_values(1)
-        return pd.DataFrame(columns=headers)
+        try:
+            headers = sheets[sheet_name].row_values(1)
+            return pd.DataFrame(columns=headers)
+        except Exception:
+            return pd.DataFrame()
     return pd.DataFrame(records)
 
 def actualizar_inventario():
-    """Recalcula y actualiza el inventario basándose en un SKU (Producto + Talla)."""
+    # (El código de esta función no cambia)
     compras_df = get_data("compras")
     ventas_df = get_data("ventas")
 
@@ -132,6 +139,7 @@ opcion = st.sidebar.radio(
 
 # --- PESTAÑA DE GESTIÓN ---
 if opcion == "⚙️ Gestión":
+    # (El código de esta sección no cambia)
     st.header("Gestión de Datos Maestros")
     st.info("Aquí puedes añadir nuevos productos, clientes y proveedores a tus listas.")
     tab1, tab2, tab3 = st.tabs(["🛍️ Productos", "👥 Clientes", "🚚 Proveedores"])
@@ -184,7 +192,6 @@ if opcion == "⚙️ Gestión":
         st.subheader("Lista de Proveedores Actual")
         st.dataframe(proveedores_df, use_container_width=True)
 
-
 # --- PESTAÑA DE VENTAS ---
 elif opcion == "💰 Registrar Venta":
     st.header("Formulario de Registro de Ventas")
@@ -204,12 +211,7 @@ elif opcion == "💰 Registrar Venta":
         st.markdown("---")
         st.subheader("Paso 2: Añade Productos a la Venta")
 
-        producto_vendido = st.selectbox(
-            "Selecciona un producto", 
-            options=[""] + list(PRODUCTOS.keys()), 
-            key="venta_prod_selector",
-            label_visibility="collapsed"
-        )
+        producto_vendido = st.selectbox("Selecciona un producto", options=[""] + list(PRODUCTOS.keys()), key="venta_prod_selector", label_visibility="collapsed")
 
         if producto_vendido:
             with st.form("item_venta_form", clear_on_submit=True):
@@ -219,13 +221,7 @@ elif opcion == "💰 Registrar Venta":
                 c1, c2, c3 = st.columns(3)
                 talla_vendida = c1.selectbox("Talla", options=PRODUCTOS.get(producto_vendido, []))
                 cantidad_vendida = c2.number_input("Cantidad", min_value=1, step=1)
-                precio_unitario = c3.number_input(
-                    "Precio Unitario ($)", 
-                    min_value=0.0, 
-                    value=precio_defecto, 
-                    format="%.2f",
-                    key=f"precio_venta_{producto_vendido}"
-                )
+                precio_unitario = c3.number_input("Precio Unitario ($)", min_value=0.0, value=precio_defecto, format="%.2f", key=f"precio_venta_{producto_vendido}")
                 
                 if st.form_submit_button("➕ Añadir Producto"):
                     item = {"Producto": producto_vendido, "Talla": talla_vendida, "Cantidad": cantidad_vendida, "Precio Unitario": precio_unitario, "Total Venta": cantidad_vendida * precio_unitario}
@@ -235,22 +231,13 @@ elif opcion == "💰 Registrar Venta":
         if st.session_state.venta_actual:
             st.markdown("---")
             st.subheader("Venta Actual")
-            df_venta_actual = pd.DataFrame(st.session_state.venta_actual)
-            st.dataframe(df_venta_actual, use_container_width=True)
+            st.dataframe(pd.DataFrame(st.session_state.venta_actual), use_container_width=True)
 
             with st.form("eliminar_item_venta_form"):
-                st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
-                indices_a_eliminar = st.multiselect(
-                    "Selecciona productos para eliminar",
-                    options=range(len(st.session_state.venta_actual)),
-                    format_func=lambda i: f"{st.session_state.venta_actual[i]['Producto']} (Talla: {st.session_state.venta_actual[i]['Talla']}, Cant: {st.session_state.venta_actual[i]['Cantidad']})"
-                )
+                indices_a_eliminar = st.multiselect("Selecciona productos para eliminar", options=range(len(st.session_state.venta_actual)), format_func=lambda i: f"{st.session_state.venta_actual[i]['Producto']} (Talla: {st.session_state.venta_actual[i]['Talla']})")
                 if st.form_submit_button("🗑️ Eliminar Seleccionados"):
-                    if indices_a_eliminar:
-                        st.session_state.venta_actual = [item for i, item in enumerate(st.session_state.venta_actual) if i not in indices_a_eliminar]
-                        st.rerun()
-                    else:
-                        st.warning("No has seleccionado ningún producto para eliminar.")
+                    st.session_state.venta_actual = [item for i, item in enumerate(st.session_state.venta_actual) if i not in indices_a_eliminar]
+                    st.rerun()
             
             if st.session_state.venta_actual:
                 st.markdown("---")
@@ -258,31 +245,45 @@ elif opcion == "💰 Registrar Venta":
                 total_venta_actual = pd.DataFrame(st.session_state.venta_actual)["Total Venta"].sum()
                 st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
 
+                estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"], key="estado_pago_selector")
+                
                 with st.form("finalizar_venta_form"):
-                    estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
+                    monto_abono_inicial = 0
+                    if estado_pago == "Abono":
+                        monto_abono_inicial = st.number_input("Monto del Abono Inicial ($)", min_value=0.01, max_value=total_venta_actual, format="%.2f")
+
                     if st.form_submit_button("✅ Registrar Venta Completa"):
-                        if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
-                            sheets["clientes"].append_row([cliente_nuevo])
-                            st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
-                            st.cache_data.clear()
-                        
-                        with st.spinner("Registrando venta..."):
-                            id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
-                            fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            filas_para_añadir = []
-                            for item in st.session_state.venta_actual:
-                                fila = [id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago]
-                                filas_para_añadir.append(fila)
-                            sheets["ventas"].append_rows(filas_para_añadir)
-                            st.success(f"¡Venta {id_venta} registrada!")
-                            st.balloons()
-                            st.session_state.venta_actual = []
-                            actualizar_inventario()
-                            st.rerun()
+                        if estado_pago == "Abono" and monto_abono_inicial <= 0:
+                            st.error("Para un 'Abono', el monto debe ser mayor a cero.")
+                        else:
+                            if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
+                                sheets["clientes"].append_row([cliente_nuevo])
+                                st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
+                                st.cache_data.clear()
+                            
+                            with st.spinner("Registrando venta y pago inicial..."):
+                                id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
+                                fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                if estado_pago == "Pagado":
+                                    id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
+                                    sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, total_venta_actual])
+                                elif estado_pago == "Abono":
+                                    id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
+                                    sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, monto_abono_inicial])
+
+                                filas_venta = [[id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago] for item in st.session_state.venta_actual]
+                                sheets["ventas"].append_rows(filas_venta)
+                                
+                                st.success(f"¡Venta {id_venta} registrada!")
+                                st.balloons()
+                                st.session_state.venta_actual = []
+                                actualizar_inventario()
+                                st.rerun()
     else:
         st.warning("Por favor, selecciona o añade un cliente para continuar.")
 
-# --- PESTAÑA DE COMPRAS ---
+# --- PESTAÑA DE COMPRAS (Sin cambios) ---
 elif opcion == "🛒 Registrar Compra":
     st.header("Formulario de Registro de Compras")
     
@@ -301,12 +302,7 @@ elif opcion == "🛒 Registrar Compra":
         st.markdown("---")
         st.subheader("Paso 2: Añade Productos a la Orden")
         
-        producto_comprado = st.selectbox(
-            "Selecciona un producto", 
-            options=[""] + list(PRODUCTOS.keys()), 
-            key="compra_prod_selector",
-            label_visibility="collapsed"
-        )
+        producto_comprado = st.selectbox("Selecciona un producto", options=[""] + list(PRODUCTOS.keys()), key="compra_prod_selector", label_visibility="collapsed")
 
         if producto_comprado:
             with st.form("item_compra_form", clear_on_submit=True):
@@ -316,13 +312,7 @@ elif opcion == "🛒 Registrar Compra":
                 c1, c2, c3 = st.columns(3)
                 talla_comprada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_comprado, []))
                 cantidad_comprada = c2.number_input("Cantidad", min_value=1, step=1)
-                costo_unitario = c3.number_input(
-                    "Costo Unitario ($)", 
-                    min_value=0.0, 
-                    value=costo_defecto, 
-                    format="%.2f",
-                    key=f"costo_compra_{producto_comprado}"
-                )
+                costo_unitario = c3.number_input("Costo Unitario ($)", min_value=0.0, value=costo_defecto, format="%.2f", key=f"costo_compra_{producto_comprado}")
                 
                 if st.form_submit_button("➕ Añadir Producto"):
                     item = {"Producto": producto_comprado, "Talla": talla_comprada, "Cantidad": cantidad_comprada, "Costo Total": cantidad_comprada * costo_unitario}
@@ -335,18 +325,10 @@ elif opcion == "🛒 Registrar Compra":
             st.dataframe(pd.DataFrame(st.session_state.compra_actual), use_container_width=True)
 
             with st.form("eliminar_item_compra_form"):
-                st.write("Para eliminar, selecciona uno o más productos de la lista y haz clic en el botón.")
-                indices_a_eliminar = st.multiselect(
-                    "Selecciona productos para eliminar",
-                    options=range(len(st.session_state.compra_actual)),
-                    format_func=lambda i: f"{st.session_state.compra_actual[i]['Producto']} (Talla: {st.session_state.compra_actual[i]['Talla']}, Cant: {st.session_state.compra_actual[i]['Cantidad']})"
-                )
+                indices_a_eliminar = st.multiselect("Selecciona productos para eliminar", options=range(len(st.session_state.compra_actual)), format_func=lambda i: f"{st.session_state.compra_actual[i]['Producto']} (Talla: {st.session_state.compra_actual[i]['Talla']})")
                 if st.form_submit_button("🗑️ Eliminar Seleccionados"):
-                    if indices_a_eliminar:
-                        st.session_state.compra_actual = [item for i, item in enumerate(st.session_state.compra_actual) if i not in indices_a_eliminar]
-                        st.rerun()
-                    else:
-                        st.warning("No has seleccionado ningún producto para eliminar.")
+                    st.session_state.compra_actual = [item for i, item in enumerate(st.session_state.compra_actual) if i not in indices_a_eliminar]
+                    st.rerun()
 
             if st.session_state.compra_actual:
                 st.markdown("---")
@@ -362,10 +344,7 @@ elif opcion == "🛒 Registrar Compra":
                         with st.spinner("Registrando compra..."):
                             id_compra = f"COMPRA-{uuid.uuid4().hex[:8].upper()}"
                             fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            filas_para_añadir = []
-                            for item in st.session_state.compra_actual:
-                                fila = [id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor_final, item["Cantidad"], item["Costo Total"], costo_envio]
-                                filas_para_añadir.append(fila)
+                            filas_para_añadir = [[id_compra, fecha_compra, item["Producto"], item["Talla"], proveedor_final, item["Cantidad"], item["Costo Total"], costo_envio] for item in st.session_state.compra_actual]
                             sheets["compras"].append_rows(filas_para_añadir)
                             st.success(f"¡Compra {id_compra} registrada!")
                             st.balloons()
@@ -380,72 +359,91 @@ elif opcion == "🧾 Cuentas por Cobrar":
     st.header("Gestión de Cuentas por Cobrar")
     
     ventas_df = get_data("ventas")
+    pagos_df = get_data("pagos")
+
     if not ventas_df.empty:
-        # Asegurar que las columnas sean del tipo correcto
         ventas_df['Total Venta'] = pd.to_numeric(ventas_df['Total Venta'], errors='coerce').fillna(0)
+        ventas_pendientes = ventas_df[ventas_df['Estado Pago'].isin(['Debe', 'Abono'])]
         
-        cuentas_pendientes = ventas_df[ventas_df['Estado Pago'].isin(['Debe', 'Abono'])]
-        
-        if not cuentas_pendientes.empty:
-            st.subheader("Resumen de Deudas por Cliente")
-            resumen_deudas = cuentas_pendientes.groupby(['ID Venta', 'Cliente', 'Estado Pago'])['Total Venta'].sum().reset_index()
-            st.dataframe(resumen_deudas, use_container_width=True)
+        if not ventas_pendientes.empty:
+            if not pagos_df.empty:
+                pagos_df['Monto Pagado'] = pd.to_numeric(pagos_df['Monto Pagado'], errors='coerce').fillna(0)
+                total_pagado_por_venta = pagos_df.groupby('ID Venta')['Monto Pagado'].sum().reset_index()
+            else:
+                total_pagado_por_venta = pd.DataFrame(columns=['ID Venta', 'Monto Pagado'])
+            
+            total_venta = ventas_pendientes.groupby('ID Venta').agg(
+                Cliente=('Cliente', 'first'),
+                Total_Venta=('Total Venta', 'sum')
+            ).reset_index()
+
+            resumen_deudas = pd.merge(total_venta, total_pagado_por_venta, on='ID Venta', how='left').fillna(0)
+            resumen_deudas['Saldo Pendiente'] = resumen_deudas['Total_Venta'] - resumen_deudas['Monto Pagado']
+            
+            st.subheader("Resumen de Deudas")
+            st.dataframe(resumen_deudas[resumen_deudas['Saldo Pendiente'] > 0.01], use_container_width=True)
 
             st.markdown("---")
-            st.subheader("Actualizar Estado de Pago")
-            with st.form("actualizar_pago_form"):
-                id_venta_a_actualizar = st.text_input("Ingresa el ID de la Venta a actualizar (ej: VENTA-ABC12345)")
-                if st.form_submit_button("Marcar como Pagado"):
-                    if id_venta_a_actualizar:
-                        try:
-                            with st.spinner("Actualizando estado..."):
-                                # Encontrar todas las celdas que coinciden con el ID Venta
-                                cell_list = sheets["ventas"].findall(id_venta_a_actualizar)
-                                if not cell_list:
-                                    st.error("No se encontró ninguna venta con ese ID.")
-                                else:
-                                    # Encontrar la columna de "Estado Pago"
-                                    headers = sheets["ventas"].row_values(1)
-                                    estado_col_index = headers.index('Estado Pago') + 1
-                                    
-                                    # Actualizar todas las filas de esa venta a "Pagado"
-                                    for cell in cell_list:
-                                        sheets["ventas"].update_cell(cell.row, estado_col_index, "Pagado")
-                                    
-                                    st.success(f"¡La venta {id_venta_a_actualizar} ha sido marcada como 'Pagado'!")
-                                    st.balloons()
-                                    st.cache_data.clear() # Limpiar cache para recargar datos
-                        except Exception as e:
-                            st.error(f"Ocurrió un error: {e}")
-                    else:
-                        st.warning("Por favor, ingresa un ID de Venta.")
+            st.subheader("Registrar Abono o Pago Final")
+            with st.form("registrar_abono_form"):
+                id_venta_pago = st.selectbox("Selecciona el ID de la Venta", options=resumen_deudas['ID Venta'].unique())
+                monto_pago = st.number_input("Monto del Pago ($)", min_value=0.01, format="%.2f")
+                
+                if st.form_submit_button("Registrar Pago"):
+                    if id_venta_pago and monto_pago > 0:
+                        with st.spinner("Registrando pago..."):
+                            id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
+                            fecha_pago = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            sheets["pagos"].append_row([id_pago, id_venta_pago, fecha_pago, monto_pago])
+                            
+                            venta_info = resumen_deudas[resumen_deudas['ID Venta'] == id_venta_pago].iloc[0]
+                            nuevo_saldo = venta_info['Saldo Pendiente'] - monto_pago
+                            
+                            if nuevo_saldo <= 0.01:
+                                cell_list = sheets["ventas"].findall(id_venta_pago)
+                                estado_col_index = sheets["ventas"].row_values(1).index('Estado Pago') + 1
+                                for cell in cell_list:
+                                    sheets["ventas"].update_cell(cell.row, estado_col_index, "Pagado")
+                                st.success(f"¡Pago registrado y Venta {id_venta_pago} marcada como 'Pagado'!")
+                            else:
+                                st.success(f"¡Abono de ${monto_pago:,.2f} registrado para la venta {id_venta_pago}!")
+
+                            st.balloons()
+                            st.cache_data.clear()
+                            st.rerun()
         else:
             st.success("🎉 ¡Felicidades! No tienes ninguna cuenta por cobrar pendiente.")
     else:
         st.info("No hay datos de ventas para analizar.")
 
-
-# --- PESTAÑA DE FINANZAS ---
+# --- PESTAÑA DE FINANZAS (LÓGICA CORREGIDA) ---
 elif opcion == "📊 Finanzas":
     st.header("Análisis Financiero")
-    ventas_df = get_data("ventas")
-    compras_df = get_data("compras")
+    
+    ventas_df_full = get_data("ventas")
+    compras_df_full = get_data("compras")
+    pagos_df_full = get_data("pagos")
 
-    if ventas_df.empty and compras_df.empty:
+    if ventas_df_full.empty and compras_df_full.empty:
         st.info("No hay datos de ventas o compras para analizar.")
     else:
-        # Asegurar tipos de datos correctos
-        if not ventas_df.empty:
-            ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'], errors='coerce')
-            ventas_df['Mes'] = ventas_df['Fecha'].dt.to_period('M').astype(str)
-            ventas_df['Total Venta'] = pd.to_numeric(ventas_df['Total Venta'], errors='coerce').fillna(0)
-        if not compras_df.empty:
-            compras_df['Fecha'] = pd.to_datetime(compras_df['Fecha'], errors='coerce')
-            compras_df['Mes'] = compras_df['Fecha'].dt.to_period('M').astype(str)
-            compras_df['Costo Total'] = pd.to_numeric(compras_df['Costo Total'], errors='coerce').fillna(0)
-            compras_df['Costo Envio'] = pd.to_numeric(compras_df['Costo Envio'], errors='coerce').fillna(0)
-        
-        meses_disponibles = sorted(pd.concat([ventas_df.get('Mes'), compras_df.get('Mes')]).dropna().unique(), reverse=True)
+        # --- PREPARACIÓN DE DATOS ---
+        if not ventas_df_full.empty:
+            ventas_df_full['Fecha'] = pd.to_datetime(ventas_df_full['Fecha'], errors='coerce')
+            ventas_df_full['Mes'] = ventas_df_full['Fecha'].dt.to_period('M').astype(str)
+            ventas_df_full['Total Venta'] = pd.to_numeric(ventas_df_full['Total Venta'], errors='coerce').fillna(0)
+        if not compras_df_full.empty:
+            compras_df_full['Fecha'] = pd.to_datetime(compras_df_full['Fecha'], errors='coerce')
+            compras_df_full['Mes'] = compras_df_full['Fecha'].dt.to_period('M').astype(str)
+            compras_df_full['Costo Total'] = pd.to_numeric(compras_df_full['Costo Total'], errors='coerce').fillna(0)
+            compras_df_full['Costo Envio'] = pd.to_numeric(compras_df_full['Costo Envio'], errors='coerce').fillna(0)
+        if not pagos_df_full.empty:
+            pagos_df_full['Fecha Pago'] = pd.to_datetime(pagos_df_full['Fecha Pago'], errors='coerce')
+            pagos_df_full['Mes'] = pagos_df_full['Fecha Pago'].dt.to_period('M').astype(str)
+            pagos_df_full['Monto Pagado'] = pd.to_numeric(pagos_df_full['Monto Pagado'], errors='coerce').fillna(0)
+
+        # --- FILTRO DE MES ---
+        meses_disponibles = sorted(pd.concat([ventas_df_full.get('Mes'), compras_df_full.get('Mes')]).dropna().unique(), reverse=True)
         if not meses_disponibles:
              st.warning("No hay datos con fechas válidas para generar el reporte.")
              st.stop()
@@ -453,35 +451,57 @@ elif opcion == "📊 Finanzas":
         mes_seleccionado = st.selectbox("Selecciona un Mes para Analizar", options=["Todos"] + meses_disponibles)
 
         if mes_seleccionado != "Todos":
-            ventas_filtradas = ventas_df[ventas_df['Mes'] == mes_seleccionado] if not ventas_df.empty else pd.DataFrame()
-            compras_filtradas = compras_df[compras_df['Mes'] == mes_seleccionado] if not compras_df.empty else pd.DataFrame()
+            ventas_filtradas = ventas_df_full[ventas_df_full['Mes'] == mes_seleccionado] if not ventas_df_full.empty else pd.DataFrame()
+            compras_filtradas = compras_df_full[compras_df_full['Mes'] == mes_seleccionado] if not compras_df_full.empty else pd.DataFrame()
+            pagos_filtrados = pagos_df_full[pagos_df_full['Mes'] == mes_seleccionado] if not pagos_df_full.empty else pd.DataFrame()
         else:
-            ventas_filtradas = ventas_df
-            compras_filtradas = compras_df
+            ventas_filtradas = ventas_df_full
+            compras_filtradas = compras_df_full
+            pagos_filtrados = pagos_df_full
+
+        # --- CÁLCULOS FINANCIEROS ROBUSTOS ---
         
-        # --- CÁLCULOS FINANCIEROS CORREGIDOS ---
-        ventas_pagadas = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
-        cuentas_por_cobrar = ventas_filtradas[ventas_filtradas['Estado Pago'].isin(['Debe', 'Abono'])]
+        # 1. Ingresos Reales (para el período seleccionado)
+        ingresos_de_pagos = pagos_filtrados['Monto Pagado'].sum()
         
-        total_ingresos_reales = ventas_pagadas['Total Venta'].sum()
-        total_por_cobrar = cuentas_por_cobrar['Total Venta'].sum()
-        
+        ingresos_legacy = 0
+        ventas_pagadas_periodo = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
+        if not ventas_pagadas_periodo.empty:
+            id_ventas_con_pago = pagos_df_full['ID Venta'].unique()
+            ventas_legacy_pagadas = ventas_pagadas_periodo[~ventas_pagadas_periodo['ID Venta'].isin(id_ventas_con_pago)]
+            ingresos_legacy = ventas_legacy_pagadas.groupby('ID Venta')['Total Venta'].sum().sum()
+            
+        total_ingresos_reales = ingresos_de_pagos + ingresos_legacy
+
+        # 2. Gastos Totales (para el período seleccionado)
         total_costo_producto = compras_filtradas['Costo Total'].sum()
         if not compras_filtradas.empty and 'ID Compra' in compras_filtradas.columns:
             total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum()
         else:
             total_costo_envio = 0
-
         total_gastos = total_costo_producto + total_costo_envio
+
+        # 3. Ganancia Real (para el período seleccionado)
         ganancia_real = total_ingresos_reales - total_gastos
 
+        # 4. Cuentas por Cobrar (Total histórico)
+        ventas_pendientes_full = ventas_df_full[ventas_df_full['Estado Pago'].isin(['Debe', 'Abono'])]
+        if not ventas_pendientes_full.empty:
+            total_deuda_bruta = ventas_pendientes_full.groupby('ID Venta')['Total Venta'].sum().sum()
+            pagos_de_deudas = pagos_df_full[pagos_df_full['ID Venta'].isin(ventas_pendientes_full['ID Venta'].unique())]
+            total_abonado_a_deudas = pagos_de_deudas['Monto Pagado'].sum()
+            total_por_cobrar = total_deuda_bruta - total_abonado_a_deudas
+        else:
+            total_por_cobrar = 0
+
+        # --- MOSTRAR MÉTRICAS ---
         st.markdown("---")
         st.subheader(f"Resumen Financiero para: {mes_seleccionado}")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("💰 Ingresos Reales (Pagado)", f"${total_ingresos_reales:,.2f}")
+        col1.metric("💰 Ingresos Reales (Recibido)", f"${total_ingresos_reales:,.2f}")
         col2.metric("💸 Gastos Totales", f"${total_gastos:,.2f}")
         col3.metric("📈 Ganancia Real", f"${ganancia_real:,.2f}", delta=f"{ganancia_real:,.2f}")
-        col4.metric("🧾 Cuentas por Cobrar", f"${total_por_cobrar:,.2f}")
+        col4.metric("🧾 Cuentas por Cobrar (Total)", f"${total_por_cobrar:,.2f}")
 
         st.markdown("---")
         st.subheader(f"Detalle de Movimientos para: {mes_seleccionado}")
@@ -498,10 +518,12 @@ elif opcion == "📈 Ver Inventario":
     if st.button("🔄 Refrescar Inventario"):
         with st.spinner("Actualizando..."):
             actualizar_inventario()
-            st.cache_data.clear() # Limpiar cache para ver cambios
+            st.cache_data.clear()
     
     inventario_df = get_data("inventario")
     if not inventario_df.empty:
         st.dataframe(inventario_df, use_container_width=True)
     else:
         st.info("No hay datos de inventario. Registra compras para empezar.")
+
+
