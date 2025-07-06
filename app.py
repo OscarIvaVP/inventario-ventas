@@ -245,7 +245,6 @@ elif opcion == "💰 Registrar Venta":
                 total_venta_actual = pd.DataFrame(st.session_state.venta_actual)["Total Venta"].sum()
                 st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
 
-                # --- LÓGICA DE ABONO CORREGIDA ---
                 estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"], key="estado_pago_selector")
                 
                 with st.form("finalizar_venta_form"):
@@ -417,31 +416,34 @@ elif opcion == "🧾 Cuentas por Cobrar":
     else:
         st.info("No hay datos de ventas para analizar.")
 
-# --- PESTAÑA DE FINANZAS ---
+# --- PESTAÑA DE FINANZAS (LÓGICA CORREGIDA) ---
 elif opcion == "📊 Finanzas":
     st.header("Análisis Financiero")
-    ventas_df = get_data("ventas")
-    compras_df = get_data("compras")
-    pagos_df = get_data("pagos")
+    
+    ventas_df_full = get_data("ventas")
+    compras_df_full = get_data("compras")
+    pagos_df_full = get_data("pagos")
 
-    if ventas_df.empty and compras_df.empty:
+    if ventas_df_full.empty and compras_df_full.empty:
         st.info("No hay datos de ventas o compras para analizar.")
     else:
-        if not ventas_df.empty:
-            ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'], errors='coerce')
-            ventas_df['Mes'] = ventas_df['Fecha'].dt.to_period('M').astype(str)
-            ventas_df['Total Venta'] = pd.to_numeric(ventas_df['Total Venta'], errors='coerce').fillna(0)
-        if not compras_df.empty:
-            compras_df['Fecha'] = pd.to_datetime(compras_df['Fecha'], errors='coerce')
-            compras_df['Mes'] = compras_df['Fecha'].dt.to_period('M').astype(str)
-            compras_df['Costo Total'] = pd.to_numeric(compras_df['Costo Total'], errors='coerce').fillna(0)
-            compras_df['Costo Envio'] = pd.to_numeric(compras_df['Costo Envio'], errors='coerce').fillna(0)
-        if not pagos_df.empty:
-            pagos_df['Fecha Pago'] = pd.to_datetime(pagos_df['Fecha Pago'], errors='coerce')
-            pagos_df['Mes'] = pagos_df['Fecha Pago'].dt.to_period('M').astype(str)
-            pagos_df['Monto Pagado'] = pd.to_numeric(pagos_df['Monto Pagado'], errors='coerce').fillna(0)
+        # --- PREPARACIÓN DE DATOS ---
+        if not ventas_df_full.empty:
+            ventas_df_full['Fecha'] = pd.to_datetime(ventas_df_full['Fecha'], errors='coerce')
+            ventas_df_full['Mes'] = ventas_df_full['Fecha'].dt.to_period('M').astype(str)
+            ventas_df_full['Total Venta'] = pd.to_numeric(ventas_df_full['Total Venta'], errors='coerce').fillna(0)
+        if not compras_df_full.empty:
+            compras_df_full['Fecha'] = pd.to_datetime(compras_df_full['Fecha'], errors='coerce')
+            compras_df_full['Mes'] = compras_df_full['Fecha'].dt.to_period('M').astype(str)
+            compras_df_full['Costo Total'] = pd.to_numeric(compras_df_full['Costo Total'], errors='coerce').fillna(0)
+            compras_df_full['Costo Envio'] = pd.to_numeric(compras_df_full['Costo Envio'], errors='coerce').fillna(0)
+        if not pagos_df_full.empty:
+            pagos_df_full['Fecha Pago'] = pd.to_datetime(pagos_df_full['Fecha Pago'], errors='coerce')
+            pagos_df_full['Mes'] = pagos_df_full['Fecha Pago'].dt.to_period('M').astype(str)
+            pagos_df_full['Monto Pagado'] = pd.to_numeric(pagos_df_full['Monto Pagado'], errors='coerce').fillna(0)
 
-        meses_disponibles = sorted(pd.concat([ventas_df.get('Mes'), compras_df.get('Mes')]).dropna().unique(), reverse=True)
+        # --- FILTRO DE MES ---
+        meses_disponibles = sorted(pd.concat([ventas_df_full.get('Mes'), compras_df_full.get('Mes')]).dropna().unique(), reverse=True)
         if not meses_disponibles:
              st.warning("No hay datos con fechas válidas para generar el reporte.")
              st.stop()
@@ -449,29 +451,50 @@ elif opcion == "📊 Finanzas":
         mes_seleccionado = st.selectbox("Selecciona un Mes para Analizar", options=["Todos"] + meses_disponibles)
 
         if mes_seleccionado != "Todos":
-            ventas_filtradas = ventas_df[ventas_df['Mes'] == mes_seleccionado] if not ventas_df.empty else pd.DataFrame()
-            compras_filtradas = compras_df[compras_df['Mes'] == mes_seleccionado] if not compras_df.empty else pd.DataFrame()
-            pagos_filtrados = pagos_df[pagos_df['Mes'] == mes_seleccionado] if not pagos_df.empty else pd.DataFrame()
+            ventas_filtradas = ventas_df_full[ventas_df_full['Mes'] == mes_seleccionado] if not ventas_df_full.empty else pd.DataFrame()
+            compras_filtradas = compras_df_full[compras_df_full['Mes'] == mes_seleccionado] if not compras_df_full.empty else pd.DataFrame()
+            pagos_filtrados = pagos_df_full[pagos_df_full['Mes'] == mes_seleccionado] if not pagos_df_full.empty else pd.DataFrame()
         else:
-            ventas_filtradas = ventas_df
-            compras_filtradas = compras_df
-            pagos_filtrados = pagos_df
+            ventas_filtradas = ventas_df_full
+            compras_filtradas = compras_df_full
+            pagos_filtrados = pagos_df_full
 
-        total_ingresos_reales = pagos_filtrados['Monto Pagado'].sum()
+        # --- CÁLCULOS FINANCIEROS ROBUSTOS ---
         
-        total_ventas_brutas = get_data("ventas")['Total Venta'].sum()
-        total_pagado_historico = get_data("pagos")['Monto Pagado'].sum()
-        total_por_cobrar = total_ventas_brutas - total_pagado_historico
+        # 1. Ingresos Reales (para el período seleccionado)
+        ingresos_de_pagos = pagos_filtrados['Monto Pagado'].sum()
         
+        ingresos_legacy = 0
+        ventas_pagadas_periodo = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
+        if not ventas_pagadas_periodo.empty:
+            id_ventas_con_pago = pagos_df_full['ID Venta'].unique()
+            ventas_legacy_pagadas = ventas_pagadas_periodo[~ventas_pagadas_periodo['ID Venta'].isin(id_ventas_con_pago)]
+            ingresos_legacy = ventas_legacy_pagadas.groupby('ID Venta')['Total Venta'].sum().sum()
+            
+        total_ingresos_reales = ingresos_de_pagos + ingresos_legacy
+
+        # 2. Gastos Totales (para el período seleccionado)
         total_costo_producto = compras_filtradas['Costo Total'].sum()
         if not compras_filtradas.empty and 'ID Compra' in compras_filtradas.columns:
             total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum()
         else:
             total_costo_envio = 0
-
         total_gastos = total_costo_producto + total_costo_envio
+
+        # 3. Ganancia Real (para el período seleccionado)
         ganancia_real = total_ingresos_reales - total_gastos
 
+        # 4. Cuentas por Cobrar (Total histórico)
+        ventas_pendientes_full = ventas_df_full[ventas_df_full['Estado Pago'].isin(['Debe', 'Abono'])]
+        if not ventas_pendientes_full.empty:
+            total_deuda_bruta = ventas_pendientes_full.groupby('ID Venta')['Total Venta'].sum().sum()
+            pagos_de_deudas = pagos_df_full[pagos_df_full['ID Venta'].isin(ventas_pendientes_full['ID Venta'].unique())]
+            total_abonado_a_deudas = pagos_de_deudas['Monto Pagado'].sum()
+            total_por_cobrar = total_deuda_bruta - total_abonado_a_deudas
+        else:
+            total_por_cobrar = 0
+
+        # --- MOSTRAR MÉTRICAS ---
         st.markdown("---")
         st.subheader(f"Resumen Financiero para: {mes_seleccionado}")
         col1, col2, col3, col4 = st.columns(4)
