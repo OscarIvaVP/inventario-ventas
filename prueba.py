@@ -87,7 +87,6 @@ def actualizar_inventario():
         return pd.DataFrame()
 
     if not compras_df.empty:
-        # --- CORRECCIÓN AQUÍ: Asegurar que la cantidad sea numérica ---
         compras_df['Cantidad'] = pd.to_numeric(compras_df['Cantidad'], errors='coerce').fillna(0)
         compras_df['SKU'] = compras_df['Producto'].astype(str) + " - " + compras_df['Talla'].astype(str)
         stock_comprado = compras_df.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Compradas'})
@@ -95,7 +94,6 @@ def actualizar_inventario():
         stock_comprado = pd.DataFrame(columns=['SKU', 'Unidades Compradas'])
 
     if not ventas_df.empty:
-        # --- CORRECCIÓN AQUÍ: Asegurar que la cantidad sea numérica ---
         ventas_df['Cantidad'] = pd.to_numeric(ventas_df['Cantidad'], errors='coerce').fillna(0)
         ventas_df['SKU'] = ventas_df['Producto'].astype(str) + " - " + ventas_df['Talla'].astype(str)
         stock_vendido = ventas_df.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Vendidas'})
@@ -104,7 +102,6 @@ def actualizar_inventario():
 
     inventario_df = pd.merge(stock_comprado, stock_vendido, on='SKU', how='outer').fillna(0)
     
-    # --- CORRECCIÓN AQUÍ: Asegurar que las columnas para restar sean numéricas ---
     inventario_df['Unidades Compradas'] = pd.to_numeric(inventario_df['Unidades Compradas'], errors='coerce').fillna(0)
     inventario_df['Unidades Vendidas'] = pd.to_numeric(inventario_df['Unidades Vendidas'], errors='coerce').fillna(0)
 
@@ -130,7 +127,7 @@ st.title("🌟 Gestor de Negocio Dinámico")
 
 opcion = st.sidebar.radio(
     "Selecciona una opción:", 
-    ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas", "⚙️ Gestión"]
+    ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas", "🧾 Cuentas por Cobrar", "⚙️ Gestión"]
 )
 
 # --- PESTAÑA DE GESTIÓN ---
@@ -378,33 +375,75 @@ elif opcion == "🛒 Registrar Compra":
     else:
         st.warning("Por favor, selecciona o añade un proveedor para continuar.")
 
-# --- OTRAS PESTAÑAS (INVENTARIO, FINANZAS) ---
-elif opcion == "📈 Ver Inventario":
-    st.header("Vista del Inventario Actual")
-    if st.button("🔄 Refrescar Inventario"):
-        with st.spinner("Actualizando..."):
-            actualizar_inventario()
+# --- PESTAÑA DE CUENTAS POR COBRAR ---
+elif opcion == "🧾 Cuentas por Cobrar":
+    st.header("Gestión de Cuentas por Cobrar")
     
-    inventario_df = get_data("inventario")
-    if not inventario_df.empty:
-        st.dataframe(inventario_df, use_container_width=True)
-    else:
-        st.info("No hay datos de inventario. Registra compras para empezar.")
+    ventas_df = get_data("ventas")
+    if not ventas_df.empty:
+        # Asegurar que las columnas sean del tipo correcto
+        ventas_df['Total Venta'] = pd.to_numeric(ventas_df['Total Venta'], errors='coerce').fillna(0)
+        
+        cuentas_pendientes = ventas_df[ventas_df['Estado Pago'].isin(['Debe', 'Abono'])]
+        
+        if not cuentas_pendientes.empty:
+            st.subheader("Resumen de Deudas por Cliente")
+            resumen_deudas = cuentas_pendientes.groupby(['ID Venta', 'Cliente', 'Estado Pago'])['Total Venta'].sum().reset_index()
+            st.dataframe(resumen_deudas, use_container_width=True)
 
+            st.markdown("---")
+            st.subheader("Actualizar Estado de Pago")
+            with st.form("actualizar_pago_form"):
+                id_venta_a_actualizar = st.text_input("Ingresa el ID de la Venta a actualizar (ej: VENTA-ABC12345)")
+                if st.form_submit_button("Marcar como Pagado"):
+                    if id_venta_a_actualizar:
+                        try:
+                            with st.spinner("Actualizando estado..."):
+                                # Encontrar todas las celdas que coinciden con el ID Venta
+                                cell_list = sheets["ventas"].findall(id_venta_a_actualizar)
+                                if not cell_list:
+                                    st.error("No se encontró ninguna venta con ese ID.")
+                                else:
+                                    # Encontrar la columna de "Estado Pago"
+                                    headers = sheets["ventas"].row_values(1)
+                                    estado_col_index = headers.index('Estado Pago') + 1
+                                    
+                                    # Actualizar todas las filas de esa venta a "Pagado"
+                                    for cell in cell_list:
+                                        sheets["ventas"].update_cell(cell.row, estado_col_index, "Pagado")
+                                    
+                                    st.success(f"¡La venta {id_venta_a_actualizar} ha sido marcada como 'Pagado'!")
+                                    st.balloons()
+                                    st.cache_data.clear() # Limpiar cache para recargar datos
+                        except Exception as e:
+                            st.error(f"Ocurrió un error: {e}")
+                    else:
+                        st.warning("Por favor, ingresa un ID de Venta.")
+        else:
+            st.success("🎉 ¡Felicidades! No tienes ninguna cuenta por cobrar pendiente.")
+    else:
+        st.info("No hay datos de ventas para analizar.")
+
+
+# --- PESTAÑA DE FINANZAS ---
 elif opcion == "📊 Finanzas":
-    st.header("Análisis Financiero Mensual")
+    st.header("Análisis Financiero")
     ventas_df = get_data("ventas")
     compras_df = get_data("compras")
 
     if ventas_df.empty and compras_df.empty:
         st.info("No hay datos de ventas o compras para analizar.")
     else:
+        # Asegurar tipos de datos correctos
         if not ventas_df.empty:
-            ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'])
+            ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'], errors='coerce')
             ventas_df['Mes'] = ventas_df['Fecha'].dt.to_period('M').astype(str)
+            ventas_df['Total Venta'] = pd.to_numeric(ventas_df['Total Venta'], errors='coerce').fillna(0)
         if not compras_df.empty:
-            compras_df['Fecha'] = pd.to_datetime(compras_df['Fecha'])
+            compras_df['Fecha'] = pd.to_datetime(compras_df['Fecha'], errors='coerce')
             compras_df['Mes'] = compras_df['Fecha'].dt.to_period('M').astype(str)
+            compras_df['Costo Total'] = pd.to_numeric(compras_df['Costo Total'], errors='coerce').fillna(0)
+            compras_df['Costo Envio'] = pd.to_numeric(compras_df['Costo Envio'], errors='coerce').fillna(0)
         
         meses_disponibles = sorted(pd.concat([ventas_df.get('Mes'), compras_df.get('Mes')]).dropna().unique(), reverse=True)
         if not meses_disponibles:
@@ -420,28 +459,49 @@ elif opcion == "📊 Finanzas":
             ventas_filtradas = ventas_df
             compras_filtradas = compras_df
         
-        total_ingresos = pd.to_numeric(ventas_filtradas['Total Venta']).sum()
+        # --- CÁLCULOS FINANCIEROS CORREGIDOS ---
+        ventas_pagadas = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
+        cuentas_por_cobrar = ventas_filtradas[ventas_filtradas['Estado Pago'].isin(['Debe', 'Abono'])]
         
-        total_costo_producto = pd.to_numeric(compras_filtradas['Costo Total']).sum()
+        total_ingresos_reales = ventas_pagadas['Total Venta'].sum()
+        total_por_cobrar = cuentas_por_cobrar['Total Venta'].sum()
+        
+        total_costo_producto = compras_filtradas['Costo Total'].sum()
         if not compras_filtradas.empty and 'ID Compra' in compras_filtradas.columns:
-            total_costo_envio = pd.to_numeric(compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio']).sum()
+            total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum()
         else:
             total_costo_envio = 0
 
         total_gastos = total_costo_producto + total_costo_envio
-        ganancia = total_ingresos - total_gastos
+        ganancia_real = total_ingresos_reales - total_gastos
 
         st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("💰 Ingresos por Ventas", f"${total_ingresos:,.2f}")
+        st.subheader(f"Resumen Financiero para: {mes_seleccionado}")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("💰 Ingresos Reales (Pagado)", f"${total_ingresos_reales:,.2f}")
         col2.metric("💸 Gastos Totales", f"${total_gastos:,.2f}")
-        col3.metric("📈 Ganancia Bruta", f"${ganancia:,.2f}", delta=f"{ganancia:,.2f} {'✅' if ganancia >= 0 else '🔻'}")
+        col3.metric("📈 Ganancia Real", f"${ganancia_real:,.2f}", delta=f"{ganancia_real:,.2f}")
+        col4.metric("🧾 Cuentas por Cobrar", f"${total_por_cobrar:,.2f}")
 
         st.markdown("---")
-        st.subheader(f"Detalle para: {mes_seleccionado}")
+        st.subheader(f"Detalle de Movimientos para: {mes_seleccionado}")
         
-        exp_ventas = st.expander("Ver detalle de ventas")
+        exp_ventas = st.expander("Ver detalle de todas las ventas")
         exp_ventas.dataframe(ventas_filtradas, use_container_width=True)
 
         exp_compras = st.expander("Ver detalle de compras")
         exp_compras.dataframe(compras_filtradas, use_container_width=True)
+
+# --- PESTAÑA DE INVENTARIO ---
+elif opcion == "📈 Ver Inventario":
+    st.header("Vista del Inventario Actual")
+    if st.button("🔄 Refrescar Inventario"):
+        with st.spinner("Actualizando..."):
+            actualizar_inventario()
+            st.cache_data.clear() # Limpiar cache para ver cambios
+    
+    inventario_df = get_data("inventario")
+    if not inventario_df.empty:
+        st.dataframe(inventario_df, use_container_width=True)
+    else:
+        st.info("No hay datos de inventario. Registra compras para empezar.")
