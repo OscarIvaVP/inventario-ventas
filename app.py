@@ -42,7 +42,7 @@ def connect_to_gsheets():
             "productos": spreadsheet.worksheet("Productos"),
             "clientes": spreadsheet.worksheet("Clientes"),
             "proveedores": spreadsheet.worksheet("Proveedores"),
-            "pagos": spreadsheet.worksheet("Pagos") # <--- NUEVA HOJA
+            "pagos": spreadsheet.worksheet("Pagos")
         }
     except gspread.exceptions.SpreadsheetNotFound:
         st.error("🚨 No se encontró la hoja de cálculo 'BaseDeDatos_Negocio'. Asegúrate de que exista y esté compartida.")
@@ -194,7 +194,6 @@ if opcion == "⚙️ Gestión":
 
 # --- PESTAÑA DE VENTAS ---
 elif opcion == "💰 Registrar Venta":
-    # (La primera parte no cambia)
     st.header("Formulario de Registro de Ventas")
     
     st.subheader("Paso 1: Elige el Cliente")
@@ -246,47 +245,47 @@ elif opcion == "💰 Registrar Venta":
                 total_venta_actual = pd.DataFrame(st.session_state.venta_actual)["Total Venta"].sum()
                 st.info(f"**Total de la Venta Actual: ${total_venta_actual:,.2f}**")
 
+                # --- LÓGICA DE ABONO CORREGIDA ---
+                estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"], key="estado_pago_selector")
+                
                 with st.form("finalizar_venta_form"):
-                    estado_pago = st.selectbox("Estado del Pago", ["Pagado", "Abono", "Debe"])
-                    
-                    # --- NUEVO CAMPO PARA ABONO INICIAL ---
                     monto_abono_inicial = 0
                     if estado_pago == "Abono":
                         monto_abono_inicial = st.number_input("Monto del Abono Inicial ($)", min_value=0.01, max_value=total_venta_actual, format="%.2f")
 
                     if st.form_submit_button("✅ Registrar Venta Completa"):
-                        if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
-                            sheets["clientes"].append_row([cliente_nuevo])
-                            st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
-                            st.cache_data.clear()
-                        
-                        with st.spinner("Registrando venta y pago inicial..."):
-                            id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
-                            fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        if estado_pago == "Abono" and monto_abono_inicial <= 0:
+                            st.error("Para un 'Abono', el monto debe ser mayor a cero.")
+                        else:
+                            if cliente_nuevo and cliente_nuevo not in clientes_df['NombreCliente'].tolist():
+                                sheets["clientes"].append_row([cliente_nuevo])
+                                st.success(f"¡Nuevo cliente '{cliente_nuevo}' añadido a la base de datos!")
+                                st.cache_data.clear()
                             
-                            # Registrar el pago inicial si es Pagado o Abono
-                            if estado_pago == "Pagado":
-                                id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
-                                sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, total_venta_actual])
-                            elif estado_pago == "Abono" and monto_abono_inicial > 0:
-                                id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
-                                sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, monto_abono_inicial])
+                            with st.spinner("Registrando venta y pago inicial..."):
+                                id_venta = f"VENTA-{uuid.uuid4().hex[:8].upper()}"
+                                fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                if estado_pago == "Pagado":
+                                    id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
+                                    sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, total_venta_actual])
+                                elif estado_pago == "Abono":
+                                    id_pago = f"PAGO-{uuid.uuid4().hex[:8].upper()}"
+                                    sheets["pagos"].append_row([id_pago, id_venta, fecha_venta, monto_abono_inicial])
 
-                            # Registrar los items de la venta
-                            filas_venta = [[id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago] for item in st.session_state.venta_actual]
-                            sheets["ventas"].append_rows(filas_venta)
-                            
-                            st.success(f"¡Venta {id_venta} registrada!")
-                            st.balloons()
-                            st.session_state.venta_actual = []
-                            actualizar_inventario()
-                            st.rerun()
+                                filas_venta = [[id_venta, fecha_venta, item["Producto"], item["Talla"], cliente_final, item["Cantidad"], item["Precio Unitario"], item["Total Venta"], estado_pago] for item in st.session_state.venta_actual]
+                                sheets["ventas"].append_rows(filas_venta)
+                                
+                                st.success(f"¡Venta {id_venta} registrada!")
+                                st.balloons()
+                                st.session_state.venta_actual = []
+                                actualizar_inventario()
+                                st.rerun()
     else:
         st.warning("Por favor, selecciona o añade un cliente para continuar.")
 
 # --- PESTAÑA DE COMPRAS (Sin cambios) ---
 elif opcion == "🛒 Registrar Compra":
-    # (El código de esta sección no cambia)
     st.header("Formulario de Registro de Compras")
     
     st.subheader("Paso 1: Elige el Proveedor")
@@ -398,11 +397,10 @@ elif opcion == "🧾 Cuentas por Cobrar":
                             fecha_pago = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             sheets["pagos"].append_row([id_pago, id_venta_pago, fecha_pago, monto_pago])
                             
-                            # Verificar si la deuda está saldada para actualizar estado
                             venta_info = resumen_deudas[resumen_deudas['ID Venta'] == id_venta_pago].iloc[0]
                             nuevo_saldo = venta_info['Saldo Pendiente'] - monto_pago
                             
-                            if nuevo_saldo <= 0.01: # Margen de error para decimales
+                            if nuevo_saldo <= 0.01:
                                 cell_list = sheets["ventas"].findall(id_venta_pago)
                                 estado_col_index = sheets["ventas"].row_values(1).index('Estado Pago') + 1
                                 for cell in cell_list:
@@ -424,12 +422,11 @@ elif opcion == "📊 Finanzas":
     st.header("Análisis Financiero")
     ventas_df = get_data("ventas")
     compras_df = get_data("compras")
-    pagos_df = get_data("pagos") # Cargar datos de pagos
+    pagos_df = get_data("pagos")
 
     if ventas_df.empty and compras_df.empty:
         st.info("No hay datos de ventas o compras para analizar.")
     else:
-        # Asegurar tipos de datos correctos
         if not ventas_df.empty:
             ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'], errors='coerce')
             ventas_df['Mes'] = ventas_df['Fecha'].dt.to_period('M').astype(str)
@@ -460,11 +457,11 @@ elif opcion == "📊 Finanzas":
             compras_filtradas = compras_df
             pagos_filtrados = pagos_df
 
-        # --- CÁLCULOS FINANCIEROS CORREGIDOS ---
         total_ingresos_reales = pagos_filtrados['Monto Pagado'].sum()
         
-        total_ventas_brutas = ventas_filtradas['Total Venta'].sum()
-        total_por_cobrar = total_ventas_brutas - get_data("pagos")['Monto Pagado'].sum() # Total histórico por cobrar
+        total_ventas_brutas = get_data("ventas")['Total Venta'].sum()
+        total_pagado_historico = get_data("pagos")['Monto Pagado'].sum()
+        total_por_cobrar = total_ventas_brutas - total_pagado_historico
         
         total_costo_producto = compras_filtradas['Costo Total'].sum()
         if not compras_filtradas.empty and 'ID Compra' in compras_filtradas.columns:
@@ -498,7 +495,7 @@ elif opcion == "📈 Ver Inventario":
     if st.button("🔄 Refrescar Inventario"):
         with st.spinner("Actualizando..."):
             actualizar_inventario()
-            st.cache_data.clear() # Limpiar cache para ver cambios
+            st.cache_data.clear()
     
     inventario_df = get_data("inventario")
     if not inventario_df.empty:
