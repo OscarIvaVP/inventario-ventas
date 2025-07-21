@@ -42,13 +42,14 @@ def connect_to_gsheets():
             "productos": spreadsheet.worksheet("Productos"),
             "clientes": spreadsheet.worksheet("Clientes"),
             "proveedores": spreadsheet.worksheet("Proveedores"),
-            "pagos": spreadsheet.worksheet("Pagos")
+            "pagos": spreadsheet.worksheet("Pagos"),
+            "obsequios": spreadsheet.worksheet("Obsequios") # <--- NUEVA HOJA
         }
     except gspread.exceptions.SpreadsheetNotFound:
         st.error("🚨 No se encontró la hoja de cálculo 'BaseDeDatos_Negocio'. Asegúrate de que exista y esté compartida.")
         st.stop()
     except gspread.exceptions.WorksheetNotFound:
-        st.error("🚨 Falta una o más hojas requeridas (Ventas, Compras, Inventario, Productos, Clientes, Proveedores, Pagos). Por favor, créalas.")
+        st.error("🚨 Falta una o más hojas requeridas (Ventas, Compras, Inventario, Productos, Clientes, Proveedores, Pagos, Obsequios). Por favor, créalas.")
         st.stop()
 
 sheets = connect_to_gsheets()
@@ -84,15 +85,12 @@ def get_data(sheet_name):
     return pd.DataFrame(records)
 
 def actualizar_inventario():
-    # (El código de esta función no cambia)
+    """Recalcula y actualiza el inventario considerando ventas y obsequios."""
     compras_df = get_data("compras")
     ventas_df = get_data("ventas")
+    obsequios_df = get_data("obsequios") # Cargar datos de obsequios
 
-    if compras_df.empty and ventas_df.empty:
-        sheets["inventario"].clear()
-        sheets["inventario"].update([["SKU", "Producto", "Talla", "Unidades Compradas", "Unidades Vendidas", "Stock Actual", "Fecha Actualizacion"]])
-        return pd.DataFrame()
-
+    # Unidades que entran (Compras)
     if not compras_df.empty:
         compras_df['Cantidad'] = pd.to_numeric(compras_df['Cantidad'], errors='coerce').fillna(0)
         compras_df['SKU'] = compras_df['Producto'].astype(str) + " - " + compras_df['Talla'].astype(str)
@@ -100,25 +98,37 @@ def actualizar_inventario():
     else:
         stock_comprado = pd.DataFrame(columns=['SKU', 'Unidades Compradas'])
 
+    # Unidades que salen (Ventas + Obsequios)
+    salidas_list = []
     if not ventas_df.empty:
         ventas_df['Cantidad'] = pd.to_numeric(ventas_df['Cantidad'], errors='coerce').fillna(0)
         ventas_df['SKU'] = ventas_df['Producto'].astype(str) + " - " + ventas_df['Talla'].astype(str)
-        stock_vendido = ventas_df.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Vendidas'})
-    else:
-        stock_vendido = pd.DataFrame(columns=['SKU', 'Unidades Vendidas'])
+        salidas_list.append(ventas_df[['SKU', 'Cantidad']])
+    
+    if not obsequios_df.empty:
+        obsequios_df['Cantidad'] = pd.to_numeric(obsequios_df['Cantidad'], errors='coerce').fillna(0)
+        obsequios_df['SKU'] = obsequios_df['Producto'].astype(str) + " - " + obsequios_df['Talla'].astype(str)
+        salidas_list.append(obsequios_df[['SKU', 'Cantidad']])
 
-    inventario_df = pd.merge(stock_comprado, stock_vendido, on='SKU', how='outer').fillna(0)
+    if salidas_list:
+        df_salidas = pd.concat(salidas_list)
+        stock_saliente = df_salidas.groupby('SKU')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Unidades Salientes'})
+    else:
+        stock_saliente = pd.DataFrame(columns=['SKU', 'Unidades Salientes'])
+
+    # Cálculo final de inventario
+    inventario_df = pd.merge(stock_comprado, stock_saliente, on='SKU', how='outer').fillna(0)
     
     inventario_df['Unidades Compradas'] = pd.to_numeric(inventario_df['Unidades Compradas'], errors='coerce').fillna(0)
-    inventario_df['Unidades Vendidas'] = pd.to_numeric(inventario_df['Unidades Vendidas'], errors='coerce').fillna(0)
+    inventario_df['Unidades Salientes'] = pd.to_numeric(inventario_df['Unidades Salientes'], errors='coerce').fillna(0)
 
     inventario_df[['Producto', 'Talla']] = inventario_df['SKU'].str.split(' - ', expand=True)
-    inventario_df['Stock Actual'] = inventario_df['Unidades Compradas'] - inventario_df['Unidades Vendidas']
+    inventario_df['Stock Actual'] = inventario_df['Unidades Compradas'] - inventario_df['Unidades Salientes']
     inventario_df['Fecha Actualizacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    column_order = ["SKU", "Producto", "Talla", "Unidades Compradas", "Unidades Vendidas", "Stock Actual", "Fecha Actualizacion"]
-    inventario_df = inventario_df[column_order]
-
+    column_order = ["SKU", "Producto", "Talla", "Unidades Compradas", "Unidades Salientes", "Stock Actual", "Fecha Actualizacion"]
+    inventario_df = inventario_df.rename(columns={'Unidades Salientes': 'Unidades Vendidas'}) # Mantener nombre de columna para consistencia visual
+    
     sheets["inventario"].clear()
     sheets["inventario"].update([inventario_df.columns.values.tolist()] + inventario_df.values.tolist())
     return inventario_df
@@ -134,7 +144,7 @@ st.title("🌟 Gestor de Negocio Dinámico")
 
 opcion = st.sidebar.radio(
     "Selecciona una opción:", 
-    ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "📊 Finanzas", "🧾 Cuentas por Cobrar", "⚙️ Gestión"]
+    ["📈 Ver Inventario", "💰 Registrar Venta", "🛒 Registrar Compra", "🎁 Registrar Obsequio", "📊 Finanzas", "🧾 Cuentas por Cobrar", "⚙️ Gestión"]
 )
 
 # --- PESTAÑA DE GESTIÓN ---
@@ -194,6 +204,7 @@ if opcion == "⚙️ Gestión":
 
 # --- PESTAÑA DE VENTAS ---
 elif opcion == "💰 Registrar Venta":
+    # (El código de esta sección no cambia)
     st.header("Formulario de Registro de Ventas")
     
     st.subheader("Paso 1: Elige el Cliente")
@@ -354,8 +365,41 @@ elif opcion == "🛒 Registrar Compra":
     else:
         st.warning("Por favor, selecciona o añade un proveedor para continuar.")
 
+# --- PESTAÑA DE OBSEQUIOS ---
+elif opcion == "🎁 Registrar Obsequio":
+    st.header("Formulario de Registro de Obsequios")
+    st.warning("Esta acción disminuirá tu inventario y se registrará como un costo (no un ingreso).")
+
+    with st.form("obsequio_form", clear_on_submit=True):
+        producto_obsequiado = st.selectbox("Producto a Obsequiar", options=list(PRODUCTOS.keys()))
+        
+        c1, c2, c3 = st.columns(3)
+        talla_obsequiada = c1.selectbox("Talla", options=PRODUCTOS.get(producto_obsequiado, []))
+        cantidad_obsequiada = c2.number_input("Cantidad", min_value=1, step=1)
+        motivo = c3.text_input("Motivo / Cliente")
+
+        if st.form_submit_button("Registrar Obsequio"):
+            if producto_obsequiado and motivo:
+                with st.spinner("Registrando obsequio..."):
+                    costo_unitario = float(productos_df[productos_df['NombreProducto'] == producto_obsequiado]['CostoCompraDefecto'].iloc[0])
+                    costo_total_obsequio = costo_unitario * cantidad_obsequiada
+
+                    id_obsequio = f"OBSEQUIO-{uuid.uuid4().hex[:8].upper()}"
+                    fecha_obsequio = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    fila = [id_obsequio, fecha_obsequio, producto_obsequiado, talla_obsequiada, cantidad_obsequiada, motivo, costo_total_obsequio]
+                    sheets["obsequios"].append_row(fila)
+
+                    st.success("¡Obsequio registrado correctamente!")
+                    st.balloons()
+                    actualizar_inventario()
+                    st.cache_data.clear()
+            else:
+                st.error("Por favor, completa todos los campos.")
+
 # --- PESTAÑA DE CUENTAS POR COBRAR ---
 elif opcion == "🧾 Cuentas por Cobrar":
+    # (El código de esta sección no cambia)
     st.header("Gestión de Cuentas por Cobrar")
     
     ventas_df = get_data("ventas")
@@ -416,13 +460,14 @@ elif opcion == "🧾 Cuentas por Cobrar":
     else:
         st.info("No hay datos de ventas para analizar.")
 
-# --- PESTAÑA DE FINANZAS (LÓGICA CORREGIDA) ---
+# --- PESTAÑA DE FINANZAS ---
 elif opcion == "📊 Finanzas":
     st.header("Análisis Financiero")
     
     ventas_df_full = get_data("ventas")
     compras_df_full = get_data("compras")
     pagos_df_full = get_data("pagos")
+    obsequios_df_full = get_data("obsequios") # Cargar datos de obsequios
 
     if ventas_df_full.empty and compras_df_full.empty:
         st.info("No hay datos de ventas o compras para analizar.")
@@ -441,6 +486,10 @@ elif opcion == "📊 Finanzas":
             pagos_df_full['Fecha Pago'] = pd.to_datetime(pagos_df_full['Fecha Pago'], errors='coerce')
             pagos_df_full['Mes'] = pagos_df_full['Fecha Pago'].dt.to_period('M').astype(str)
             pagos_df_full['Monto Pagado'] = pd.to_numeric(pagos_df_full['Monto Pagado'], errors='coerce').fillna(0)
+        if not obsequios_df_full.empty:
+            obsequios_df_full['Fecha'] = pd.to_datetime(obsequios_df_full['Fecha'], errors='coerce')
+            obsequios_df_full['Mes'] = obsequios_df_full['Fecha'].dt.to_period('M').astype(str)
+            obsequios_df_full['Costo Total'] = pd.to_numeric(obsequios_df_full['Costo Total'], errors='coerce').fillna(0)
 
         # --- FILTRO DE MES ---
         meses_disponibles = sorted(pd.concat([ventas_df_full.get('Mes'), compras_df_full.get('Mes')]).dropna().unique(), reverse=True)
@@ -454,45 +503,37 @@ elif opcion == "📊 Finanzas":
             ventas_filtradas = ventas_df_full[ventas_df_full['Mes'] == mes_seleccionado] if not ventas_df_full.empty else pd.DataFrame()
             compras_filtradas = compras_df_full[compras_df_full['Mes'] == mes_seleccionado] if not compras_df_full.empty else pd.DataFrame()
             pagos_filtrados = pagos_df_full[pagos_df_full['Mes'] == mes_seleccionado] if not pagos_df_full.empty else pd.DataFrame()
+            obsequios_filtrados = obsequios_df_full[obsequios_df_full['Mes'] == mes_seleccionado] if not obsequios_df_full.empty else pd.DataFrame()
         else:
             ventas_filtradas = ventas_df_full
             compras_filtradas = compras_df_full
             pagos_filtrados = pagos_df_full
+            obsequios_filtrados = obsequios_df_full
 
-        # --- CÁLCULOS FINANCIEROS ROBUSTOS ---
-        
-        # 1. Ingresos Reales (para el período seleccionado)
+        # --- CÁLCULOS FINANCIEROS ---
+        # 1. Ingresos
         ingresos_de_pagos = pagos_filtrados['Monto Pagado'].sum()
-        
         ingresos_legacy = 0
         ventas_pagadas_periodo = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
         if not ventas_pagadas_periodo.empty:
             id_ventas_con_pago = pagos_df_full['ID Venta'].unique()
             ventas_legacy_pagadas = ventas_pagadas_periodo[~ventas_pagadas_periodo['ID Venta'].isin(id_ventas_con_pago)]
             ingresos_legacy = ventas_legacy_pagadas.groupby('ID Venta')['Total Venta'].sum().sum()
-            
         total_ingresos_reales = ingresos_de_pagos + ingresos_legacy
 
-        # 2. Gastos Totales (para el período seleccionado)
+        # 2. Gastos
         total_costo_producto = compras_filtradas['Costo Total'].sum()
-        if not compras_filtradas.empty and 'ID Compra' in compras_filtradas.columns:
-            total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum()
-        else:
-            total_costo_envio = 0
-        total_gastos = total_costo_producto + total_costo_envio
+        total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum() if not compras_filtradas.empty else 0
+        total_costo_obsequios = obsequios_filtrados['Costo Total'].sum()
+        total_gastos = total_costo_producto + total_costo_envio + total_costo_obsequios
 
-        # 3. Ganancia Real (para el período seleccionado)
+        # 3. Ganancia
         ganancia_real = total_ingresos_reales - total_gastos
 
-        # 4. Cuentas por Cobrar (Total histórico)
-        ventas_pendientes_full = ventas_df_full[ventas_df_full['Estado Pago'].isin(['Debe', 'Abono'])]
-        if not ventas_pendientes_full.empty:
-            total_deuda_bruta = ventas_pendientes_full.groupby('ID Venta')['Total Venta'].sum().sum()
-            pagos_de_deudas = pagos_df_full[pagos_df_full['ID Venta'].isin(ventas_pendientes_full['ID Venta'].unique())]
-            total_abonado_a_deudas = pagos_de_deudas['Monto Pagado'].sum()
-            total_por_cobrar = total_deuda_bruta - total_abonado_a_deudas
-        else:
-            total_por_cobrar = 0
+        # 4. Cuentas por Cobrar
+        total_ventas_brutas = get_data("ventas")['Total Venta'].sum()
+        total_pagado_historico = get_data("pagos")['Monto Pagado'].sum()
+        total_por_cobrar = total_ventas_brutas - total_pagado_historico
 
         # --- MOSTRAR MÉTRICAS ---
         st.markdown("---")
@@ -511,6 +552,9 @@ elif opcion == "📊 Finanzas":
 
         exp_compras = st.expander("Ver detalle de compras")
         exp_compras.dataframe(compras_filtradas, use_container_width=True)
+        
+        exp_obsequios = st.expander("Ver detalle de obsequios (costo)")
+        exp_obsequios.dataframe(obsequios_filtrados, use_container_width=True)
 
 # --- PESTAÑA DE INVENTARIO ---
 elif opcion == "📈 Ver Inventario":
@@ -525,5 +569,3 @@ elif opcion == "📈 Ver Inventario":
         st.dataframe(inventario_df, use_container_width=True)
     else:
         st.info("No hay datos de inventario. Registra compras para empezar.")
-
-

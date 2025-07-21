@@ -43,7 +43,7 @@ def connect_to_gsheets():
             "clientes": spreadsheet.worksheet("Clientes"),
             "proveedores": spreadsheet.worksheet("Proveedores"),
             "pagos": spreadsheet.worksheet("Pagos"),
-            "obsequios": spreadsheet.worksheet("Obsequios") # <--- NUEVA HOJA
+            "obsequios": spreadsheet.worksheet("Obsequios")
         }
     except gspread.exceptions.SpreadsheetNotFound:
         st.error("🚨 No se encontró la hoja de cálculo 'BaseDeDatos_Negocio'. Asegúrate de que exista y esté compartida.")
@@ -88,9 +88,8 @@ def actualizar_inventario():
     """Recalcula y actualiza el inventario considerando ventas y obsequios."""
     compras_df = get_data("compras")
     ventas_df = get_data("ventas")
-    obsequios_df = get_data("obsequios") # Cargar datos de obsequios
+    obsequios_df = get_data("obsequios")
 
-    # Unidades que entran (Compras)
     if not compras_df.empty:
         compras_df['Cantidad'] = pd.to_numeric(compras_df['Cantidad'], errors='coerce').fillna(0)
         compras_df['SKU'] = compras_df['Producto'].astype(str) + " - " + compras_df['Talla'].astype(str)
@@ -98,7 +97,6 @@ def actualizar_inventario():
     else:
         stock_comprado = pd.DataFrame(columns=['SKU', 'Unidades Compradas'])
 
-    # Unidades que salen (Ventas + Obsequios)
     salidas_list = []
     if not ventas_df.empty:
         ventas_df['Cantidad'] = pd.to_numeric(ventas_df['Cantidad'], errors='coerce').fillna(0)
@@ -116,7 +114,6 @@ def actualizar_inventario():
     else:
         stock_saliente = pd.DataFrame(columns=['SKU', 'Unidades Salientes'])
 
-    # Cálculo final de inventario
     inventario_df = pd.merge(stock_comprado, stock_saliente, on='SKU', how='outer').fillna(0)
     
     inventario_df['Unidades Compradas'] = pd.to_numeric(inventario_df['Unidades Compradas'], errors='coerce').fillna(0)
@@ -127,7 +124,7 @@ def actualizar_inventario():
     inventario_df['Fecha Actualizacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     column_order = ["SKU", "Producto", "Talla", "Unidades Compradas", "Unidades Salientes", "Stock Actual", "Fecha Actualizacion"]
-    inventario_df = inventario_df.rename(columns={'Unidades Salientes': 'Unidades Vendidas'}) # Mantener nombre de columna para consistencia visual
+    inventario_df = inventario_df.rename(columns={'Unidades Salientes': 'Unidades Vendidas'})
     
     sheets["inventario"].clear()
     sheets["inventario"].update([inventario_df.columns.values.tolist()] + inventario_df.values.tolist())
@@ -467,7 +464,7 @@ elif opcion == "📊 Finanzas":
     ventas_df_full = get_data("ventas")
     compras_df_full = get_data("compras")
     pagos_df_full = get_data("pagos")
-    obsequios_df_full = get_data("obsequios") # Cargar datos de obsequios
+    obsequios_df_full = get_data("obsequios")
 
     if ventas_df_full.empty and compras_df_full.empty:
         st.info("No hay datos de ventas o compras para analizar.")
@@ -511,7 +508,6 @@ elif opcion == "📊 Finanzas":
             obsequios_filtrados = obsequios_df_full
 
         # --- CÁLCULOS FINANCIEROS ---
-        # 1. Ingresos
         ingresos_de_pagos = pagos_filtrados['Monto Pagado'].sum()
         ingresos_legacy = 0
         ventas_pagadas_periodo = ventas_filtradas[ventas_filtradas['Estado Pago'] == 'Pagado']
@@ -521,16 +517,13 @@ elif opcion == "📊 Finanzas":
             ingresos_legacy = ventas_legacy_pagadas.groupby('ID Venta')['Total Venta'].sum().sum()
         total_ingresos_reales = ingresos_de_pagos + ingresos_legacy
 
-        # 2. Gastos
         total_costo_producto = compras_filtradas['Costo Total'].sum()
         total_costo_envio = compras_filtradas.drop_duplicates(subset=['ID Compra'])['Costo Envio'].sum() if not compras_filtradas.empty else 0
         total_costo_obsequios = obsequios_filtrados['Costo Total'].sum()
         total_gastos = total_costo_producto + total_costo_envio + total_costo_obsequios
 
-        # 3. Ganancia
         ganancia_real = total_ingresos_reales - total_gastos
 
-        # 4. Cuentas por Cobrar
         total_ventas_brutas = get_data("ventas")['Total Venta'].sum()
         total_pagado_historico = get_data("pagos")['Monto Pagado'].sum()
         total_por_cobrar = total_ventas_brutas - total_pagado_historico
@@ -543,6 +536,42 @@ elif opcion == "📊 Finanzas":
         col2.metric("💸 Gastos Totales", f"${total_gastos:,.2f}")
         col3.metric("📈 Ganancia Real", f"${ganancia_real:,.2f}", delta=f"{ganancia_real:,.2f}")
         col4.metric("🧾 Cuentas por Cobrar (Total)", f"${total_por_cobrar:,.2f}")
+
+        # --- NUEVA SECCIÓN: ANÁLISIS DE INVENTARIO ---
+        st.markdown("---")
+        st.subheader("Análisis de Inventario Actual")
+        
+        inventario_df = get_data("inventario")
+        if not inventario_df.empty and not productos_df.empty:
+            inventario_df['Stock Actual'] = pd.to_numeric(inventario_df['Stock Actual'], errors='coerce').fillna(0)
+            
+            # Unir inventario con datos de productos para obtener costos y precios
+            info_productos = productos_df[['NombreProducto', 'CostoCompraDefecto', 'PrecioVentaDefecto']]
+            info_productos['CostoCompraDefecto'] = pd.to_numeric(info_productos['CostoCompraDefecto'], errors='coerce').fillna(0)
+            info_productos['PrecioVentaDefecto'] = pd.to_numeric(info_productos['PrecioVentaDefecto'], errors='coerce').fillna(0)
+
+            analisis_inv_df = pd.merge(
+                inventario_df[inventario_df['Stock Actual'] > 0],
+                info_productos,
+                left_on='Producto',
+                right_on='NombreProducto',
+                how='left'
+            )
+
+            analisis_inv_df['Valor_Costo'] = analisis_inv_df['Stock Actual'] * analisis_inv_df['CostoCompraDefecto']
+            analisis_inv_df['Valor_Venta'] = analisis_inv_df['Stock Actual'] * analisis_inv_df['PrecioVentaDefecto']
+            
+            valor_total_costo = analisis_inv_df['Valor_Costo'].sum()
+            valor_total_venta = analisis_inv_df['Valor_Venta'].sum()
+            ganancia_potencial = valor_total_venta - valor_total_costo
+
+            col_inv1, col_inv2 = st.columns(2)
+            col_inv1.metric("📦 Valor del Inventario (a costo)", f"${valor_total_costo:,.2f}")
+            col_inv2.metric("💵 Ganancia Potencial del Stock", f"${ganancia_potencial:,.2f}")
+        else:
+            st.info("No hay datos de inventario o productos para realizar el análisis.")
+        
+        # --- FIN DE LA NUEVA SECCIÓN ---
 
         st.markdown("---")
         st.subheader(f"Detalle de Movimientos para: {mes_seleccionado}")
